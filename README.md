@@ -1,2 +1,3 @@
-# daff-cloudgene
-Cloudgene server configuration
+# Cloudgene server configuration
+
+https://cloudgene.qcif.edu.au
