@@ -1,0 +1,59 @@
+id: ont_amplicon_assembly
+name: Nanopore amplicon assembly
+description: Per-sample assembly of barcode amplicons from raw Nanopore reads
+version: 0.11
+website: https://github.com/qcif/daff-ont-amplicon
+author: Maely Gauthier and Cameron Hyde
+# logo: https://github.com/qcif/
+
+workflow:
+  steps:
+    - name: Prepare input data
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/expand_paths.sh $samplesheet
+      stdout: false
+    - name: Amplicon assembly
+      params:
+        blastn_db: /mnt/data/blast/core_nt/core_nt
+        blastn_COI: /mnt/data/metacox1/MetaCOXI
+        taxdump: /mnt/data/taxdump
+        ncbi_user_email: ${CLOUDGENE_USER_EMAIL}
+        analyst_name: ${CLOUDGENE_USER_FULL_NAME}
+        facility: QCIF
+        merge: true
+        qual_filt: true
+        polishing: true
+        blast_threads: 2
+        mapping_back_to_ref: true
+    - name: Zip workflow reports
+      type: command
+      stdout: true
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/zip_reports.sh --dir $outdir
+
+  inputs:
+    - id: samplesheet
+      description: Samples CSV
+      type: file
+      accept: .csv
+      details: |
+        File paths should be the relative paths (begin with 'uploads/') to files
+        that you have uploaded via SFTP
+    - id: facility_name
+      description: Your facility/site name
+      type: string
+      value: QCIF
+      details: Included in the workflow report.
+    - id: chopper_options
+      description: Chopper options
+      type: string
+      value: -q 8 -l 100
+      details: |
+        The default value specifies -q 8 (minimum Phred average quality score of 8)
+        and -l 100 (filter reads shorter than 100 bp). Please see the chopper
+        manual for more details.
+      required: false
+
+  outputs:
+    - id: outdir
+      description: Outputs
+      type: folder
