@@ -1,7 +1,7 @@
 id: ont_amplicon_assembly
 name: Nanopore amplicon assembly
 description: Per-sample assembly of barcode amplicons from raw Nanopore reads
-version: 0.11
+version: 0.12
 website: https://github.com/qcif/daff-ont-amplicon
 author: Maely Gauthier and Cameron Hyde
 # logo: https://github.com/qcif/
@@ -15,16 +15,10 @@ workflow:
     - name: Amplicon assembly
       params:
         blastn_db: /mnt/data/blast/core_nt/core_nt
-        blastn_COI: /mnt/data/metacox1/MetaCOXI
+        blastn_COI: /mnt/data/blast/metacox1/MetaCOXI.fasta
         taxdump: /mnt/data/taxdump
         ncbi_user_email: ${CLOUDGENE_USER_EMAIL}
         analyst_name: ${CLOUDGENE_USER_FULL_NAME}
-        facility: QCIF
-        merge: true
-        qual_filt: true
-        polishing: true
-        blast_threads: 2
-        mapping_back_to_ref: true
     - name: Zip workflow reports
       type: command
       stdout: true
@@ -35,14 +29,26 @@ workflow:
       description: Samples CSV
       type: file
       accept: .csv
+      help: https://raw.githubusercontent.com/qcif/daff-ont-amplicon/refs/heads/cloudgene/tests/ont_index_mtdt_cloudgene.csv
       details: |
-        File paths should be the relative paths (begin with 'uploads/') to files
-        that you have uploaded via SFTP
-    - id: facility_name
+        Click on '?' for an example file. Right click and 'Save Link As...' to download. File paths should be the relative paths (begin with 'uploads/') to files
+        that you have uploaded via SFTP.
+    - id: facility
       description: Your facility/site name
       type: string
-      value: QCIF
       details: Included in the workflow report.
+    - id: merge
+      description: Merge fastq files with the same sample name
+      type: checkbox
+      values:
+        true: valueTrue
+        false: valueFalse
+    - id: qual_filt
+      description: Run quality filtering step using chopper
+      type: checkbox
+      values:
+        true: valueTrue
+        false: valueFalse
     - id: chopper_options
       description: Chopper options
       type: string
@@ -52,6 +58,23 @@ workflow:
         and -l 100 (filter reads shorter than 100 bp). Please see the chopper
         manual for more details.
       required: false
+    - id: polishing
+      description: Run polishing step
+      type: checkbox
+      values:
+        true: valueTrue
+        false: valueFalse
+    - id: blast_threads
+      description: Number of threads for BLASTn
+      type: number
+      value: 2
+      details: Number of threads to use for BLASTn
+    - id: mapping_back_to_ref
+      description: Mapped back to reference blast match
+      type: checkbox
+      values:
+        true: valueTrue
+        false: valueFalse
 
   outputs:
     - id: outdir
