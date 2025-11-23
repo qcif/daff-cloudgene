@@ -1,7 +1,4 @@
-<!-- <p class="alert alert-info mb-0">
-  The server is currently running on limited resources - jobs will run more slowly than usual.
-</p> -->
-<p class="alert alert-info mb-0">
+<p class="alert alert-info text-center mb-0">
   The service will be temporarily suspended for maintenance on December 1 at 10:00 AEST. Any jobs running at this time will be cancelled.
 </p>
 
