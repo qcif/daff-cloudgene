@@ -1,4 +1,4 @@
-<p class="alert alert-warn text-center mb-0">
+<p class="alert alert-warning text-center mb-0">
   The service will be temporarily suspended for maintenance on
   <span class="text-danger">December 9 at 10:00 AEST</span>.
   Any jobs running at this time will be cancelled.
