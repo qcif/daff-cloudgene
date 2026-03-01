@@ -1,8 +1,8 @@
-<p class="alert alert-warning text-center mb-0">
+<!-- <p class="alert alert-warning text-center mb-0">
   The service will be suspended for maintenance on
   <span class="text-danger">Sunday March 1 at 10:00 AEST</span>
   for up to 4 hours. Any jobs running at this time will be cancelled.
-</p>
+</p> -->
 
 <div class="jumbotron jumbotron-fluid text-white" style="background: #343a40;">
   <div class="container">
