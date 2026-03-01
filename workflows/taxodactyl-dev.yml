@@ -1,9 +1,9 @@
 # Could possible store API keys in a local file and index them by user email
 
-id: taxodactyl
+id: taxodactyl_dev
 name: Taxodactyl (dev)
 description: Per-sample taxonomic classification from assembled DNA barcodes
-version: 1.4.3-dev-tabs
+version: 1.4.4-dev-class
 website: https://github.com/qcif/taxodactyl
 author: Magdalena Antczak, Cameron Hyde and Daisy Li
 logo: https://github.com/qcif/taxodactyl/blob/main/docs/images/taxodactyl_logo.png?raw=true
@@ -17,13 +17,17 @@ workflow:
         taxdb: /mnt/data/taxdump
         ncbi_user_email: ${CLOUDGENE_USER_EMAIL}
         analyst_name: ${CLOUDGENE_USER_FULL_NAME}
+      stdout: true
+      stderr: true
     - name: Check for errors
       type: command
       cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/collect_errors.sh --dir ${CLOUDGENE_WORKSPACE_HOME}/${CLOUDGENE_JOB_ID}
       stdout: true
+      stderr: true
     - name: Zip workflow reports
       type: command
       stdout: true
+      stderr: true
       cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/zip_reports.sh --dir $outdir
 
   inputs:

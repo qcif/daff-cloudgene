@@ -17,8 +17,8 @@ workflow:
         taxdb: /mnt/data/taxdump
         ncbi_user_email: ${CLOUDGENE_USER_EMAIL}
         analyst_name: ${CLOUDGENE_USER_FULL_NAME}
-        stdout: true
-        stderr: true
+      stdout: true
+      stderr: true
     - name: Check for errors
       type: command
       cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/collect_errors.sh --dir ${CLOUDGENE_WORKSPACE_HOME}/${CLOUDGENE_JOB_ID}
