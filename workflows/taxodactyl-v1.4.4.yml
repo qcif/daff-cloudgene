@@ -44,13 +44,13 @@ workflow:
       accept: .fasta, .fa, .fna, .fsa, .fas
       help: https://raw.githubusercontent.com/qcif/taxodactyl/refs/heads/main/test/sequences_example.fasta
       details: |
-        Click on '?' for an example file. Right click and 'Save Link As...' to download.
+        Only required if you do not include a "sequence" column in the metadata CSV. Click on '?' for an example file. Right click and 'Save Link As...' to download.
       required: false
     - id: ncbi_api_key
       type: string
       required: false
       description: Your NCBI API key
-      details: Not required, but will make your run go faster.
+      details: Not required, but will make your run go faster and may reduce API errors.
     - id: facility_name
       description: Your facility/site name
       type: string
