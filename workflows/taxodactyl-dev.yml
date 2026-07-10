@@ -1,9 +1,9 @@
 # Could possible store API keys in a local file and index them by user email
 
-id: taxodactyl_dev
+id: taxodactyl_dev_throttle-backoff
 name: Taxodactyl (dev)
 description: Per-sample taxonomic classification from assembled DNA barcodes
-version: 1.4.4-dev-class
+version: v1.4.4-dev-gbif-throttle-backoff
 website: https://github.com/qcif/taxodactyl
 author: Magdalena Antczak, Cameron Hyde and Daisy Li
 logo: https://github.com/qcif/taxodactyl/blob/main/docs/images/taxodactyl_logo.png?raw=true
@@ -34,16 +34,17 @@ workflow:
     - id: sequences
       description: Sample DNA sequences in FASTA format
       type: file
-      accept: .fasta, .fa, .fna, .fsa, .fas
+      required: false
+      accept: .fasta, .fa, .fna, .fas
       help: https://raw.githubusercontent.com/qcif/taxodactyl/refs/heads/main/test/sequences_example.fasta
       details: |
-        Click on '?' for an example file. Right click and 'Save Link As...' to download.
+        Optional. Click on '?' for an example file. Right click and 'Save Link As...' to download.
     - id: metadata
       description: Input metadata CSV
       type: file
       accept: .csv
       details: |
-        Click on '?' for an example file. Right click and 'Save Link As...' to download. Ensure sample IDs match those in the FASTA file. 
+        Click on '?' for an example file. Right click and 'Save Link As...' to download. If no FASTA file is uploaded, metadata must include a 'sequence' column. If FASTA is provided, ensure sample IDs match those in the FASTA file.
       help: https://raw.githubusercontent.com/qcif/taxodactyl/refs/heads/main/test/metadata_example.csv
     - id: ncbi_api_key
       type: string
@@ -54,7 +55,7 @@ workflow:
       description: Your facility/site name
       type: string
       required: false
-      details: Included in the workflow report.
+      details: Not required. If provided, included in the workflow report.
 
   outputs:
     - id: outdir
