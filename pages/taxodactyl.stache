@@ -47,7 +47,7 @@
     <h2>Preparing your input data</h2>
 
     <p>
-      The workflow requires a FASTA file containing barcode DNA sequences (possibly from WF1 output) and a CSV file with sample metadata. FASTA sequence IDs must match the <code>sample_id</code> field provided in the metadata CSV file. You should ensure that the sample IDs do not contain fancy characters - only letters, numbers, and <code>- _</code> characters are permitted. <strong>No spaces please!</strong>
+      The workflow requires a CSV file with sample metadata, and an optional FASTA file containing barcode DNA sequences (if sequences column not provided in metadata.csv). FASTA sequence IDs must match the <code>sample_id</code> field provided in the metadata CSV file. Please ensure that the sample IDs do not contain fancy characters - only letters, numbers, and <code>- _</code> characters are permitted. <strong>No spaces please!</strong>
     </p>
 
     <h5 class="mt-5 my-3">Metadata CSV format</h5>
@@ -99,6 +99,20 @@
           <td></td>
         </tr>
         <tr>
+          <td style="white-space: nowrap;"><code>classification</code></td>
+          <td>
+            Higher taxonomic classification of the sample, used to restrict the analysis to a particular taxonomic kingdom. This prevents taxodactyl from confusing e.g. Drosophila
+          </td>
+          <td></td>
+        </tr>
+        <tr>
+          <td style="white-space: nowrap;"><code>&lt;arbitrary&nbsp;columns&gt;</code></td>
+          <td>
+            Additional arbitrary columns can be added at the user's discretion (e.g. "host", "sequencing platform"). These aren't used in the analysis but will be included in the workflow report for future reference.
+          </td>
+          <td></td>
+        </tr>
+        <tr>
           <td style="white-space: nowrap;"><code>&lt;arbitrary&nbsp;columns&gt;</code></td>
           <td>
             Additional arbitrary columns can be added at the user's discretion (e.g. "host", "sequencing platform"). These aren't used in the analysis but will be included in the workflow report for future reference.
@@ -110,6 +124,12 @@
 
     <h5 class="mt-5 my-3">Example metadata CSV</h5>
 
+    <p class="alert alert-info">
+      Note that the last row is an example of an arbitrary column, and that the
+      <code>sequence</code> column is not required if you provide a FASTA file
+      with the query sequences.
+    </p>
+
     <table class="table table-bordered my-3">
       <thead style="background: #eee;">
         <tr>
@@ -119,6 +139,8 @@
           <th>taxa_of_interest</th>
           <th>country</th>
           <th>host</th>
+          <th>classification</th>
+          <th>sequence</th>
           <th>sequencing_platform</th>
         </tr>
       </thead>
@@ -130,6 +152,8 @@
           <td>Lygus pratensis</td>
           <td>Netherlands</td>
           <td>Cut flower Paenonia</td>
+          <td>Animalia</td>
+          <td>ACGTAGCTAGCT[...]</td>
           <td>Nanopore</td>
         </tr>
         <tr>
@@ -141,6 +165,11 @@
     </table>
 
     <h5 class="mt-5 my-3">Example FASTA sequence file</h5>
+    <p class=alert alert-info>
+      Note that the sequence IDs must match the <code>sample_id</code> field in
+      the metadata CSV file. Not required if this data is included in a
+      <code>sequence</code> column in <code>metadata.csv</code>.
+    </p>
     <pre class="border p-3">&gt;VE24-1079_COI
 ACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC
 ACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC
@@ -192,6 +221,11 @@ ACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC
         Once submitted, you can close the browser and come back later if desired. Just go the "Jobs" page to see your running and completed jobs.
       </li>
     </ol>
+
+    <p class=alert alert-info>
+      Note that from Taxodactyl v1.5.0, the workflow will "remember" your NCBI API
+      key and Facility name for future jobs, so you only need to enter them once.
+    </p>
   </section>
 
   <hr class="my-3">
@@ -255,9 +289,13 @@ ACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC
     <h2>Reporting issues</h2>
 
     <p>
-      If you encounter issues running a workflow, or have a suggestion for improvement, please post an issue on the
+      Please contact <a href="mailto:c.hyde@qcif.edu.au">c.hyde@qcif.edu.au</a> if you have issues using this service.
+    </p>
+
+    <p>
+      If you encounter issues with the workflow, or have a suggestion for improvement, please
       <a href="https://github.com/qcif/taxodactyl/issues" target="_blank">
-        Taxodactyl GitHub repository</a>.
+        post an issue on the Taxodactyl GitHub repository</a>.
     </p>
   </section>
 </div>

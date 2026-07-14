@@ -113,7 +113,11 @@
     <h1>Reporting issues</h1>
 
     <p>
-      If you encounter issues running a workflow, or have a suggestion for improvement, please post an issue on the relevant GitHub repository below:
+      Please contact <a href="mailto:c.hyde@qcif.edu.au">c.hyde@qcif.edu.au</a> if you have issues using this service.
+    </p>
+
+    <p>
+      If you encounter specific issues running a workflow, or have a suggestion for improvement, please also feel free to post an issue on the relevant GitHub repository below:
     </p>
 
     <table class="table table-bordered">
@@ -147,7 +151,7 @@
       <a href="/#!pages/register">
       Create an account
       </a>
-      to view and run workflows. Only accounts created with DAFF email addresses will be approved for access to workflows.
+      to view and run workflows. Please email Bradley Pease to request access to workflows once you have created an account. Only accounts created with DAFF email addresses will be approved for access to workflows.
     </p>
   </div>
 {{/is}}
