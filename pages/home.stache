@@ -39,7 +39,7 @@
       </tr>
     </thead>
     <tbody>
-      <tr>
+      <!-- <tr>
         <td>
           <a href="/#!pages/nanopore_assembly">
             #1 Barcode assembly
@@ -62,7 +62,6 @@
           <ul>
             <li>
               <code>HTML</code> web-based workflow report
-              <!-- (see <a href="">example report</a>) -->
             </li>
             <li>
               <code>FASTA</code> file of consensus sequences
@@ -72,7 +71,7 @@
         <td>
           <a class="btn btn-primary btn-sm" href="/#!run/ont_amplicon_assembly">Run</a>
         </td>
-      </tr>
+      </tr> -->
 
       <tr>
         <td>
@@ -128,12 +127,12 @@
         </tr>
       </thead>
       <tbody>
-        <tr>
+        <!-- <tr>
           <td>#1 Barcode assembly</td>
           <td>
             <a href="https://github.com/qcif/daff-ont-amplicon/issues" target="_blank">https://github.com/qcif/daff-ont-amplicon/issues</a>
           </td>
-        </tr>
+        </tr> -->
         <tr>
           <td>#2 Taxodactyl</td>
           <td>
