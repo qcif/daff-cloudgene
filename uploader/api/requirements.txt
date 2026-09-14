@@ -1,0 +1,16 @@
+# Uploader API dependencies.
+#
+# Install into the venv at uploader/venv (Python 3.12):
+#     uploader/venv/bin/pip install -r uploader/api/requirements.txt
+#
+# httpx is required by fastapi.testclient and so is needed to run the tests;
+# it is listed here rather than in a separate file because the venv is
+# shared between running the service and running the suite.
+
+requests
+fastapi
+uvicorn[standard]
+azure-identity
+azure-storage-blob
+httpx
+python-dotenv

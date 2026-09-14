@@ -1,0 +1,41 @@
+{
+  "name": "DAFF Biosecurity workflows",
+  "background": "#343a40",
+  "foreground": "navbar-dark",
+  "footer": "<p>\n  powered by <a href=\"http://cloudgene.uibk.ac.at\">Cloudgene</a>\n</p>\n\n<div class=\"d-flex flex-column align-items-center\" style=\"margin-top: -30px\">\n\n  <div>\n    Developed by\n  </div>\n\n  <div class=\"mb-3\">\n    <a href=\"https://qcif.edu.au\" target=\"_blank\">\n      <img\n        src=\"https://github.com/qcif/taxodactyl/raw/refs/heads/main/docs/images/qcif.svg\"\n        style=\"margin: auto; width: 250px\"\n      />\n    </a>\n  </div>\n\n  <div>\n    Funded by\n  </div>\n\n  <div class=\"row justify-content-center\">\n    <div class=\"col-auto mx-2\">\n      <a href=\"https://www.agriculture.gov.au/biosecurity-trade/policy\" target=\"_blank\">\n        <img\n          src=\"https://github.com/qcif/taxodactyl/raw/refs/heads/main/docs/images/daff-logo.svg\"\n          style=\"margin: auto; width: 200px\"\n        />\n      </a>\n    </div>\n    <div class=\"col-auto mx-2\">\n      <a href=\"https://biocommons.org.au\" target=\"_blank\">\n        <img\n          src=\"https://github.com/qcif/taxodactyl/raw/refs/heads/main/docs/images/Australian-Biocommons-Logo-Horizontal-RGB.png?raw=true\"\n          style=\"margin: auto; width: 200px\"\n        />\n      </a>\n    </div>\n  </div>\n</div>\n",
+  "emailRequired": true,
+  "userEmailDescription": "Receive email notifications when jobs are completed.",
+  "userWithoutEmailDescription": "You can enter your email address at any time to upgrade your account.",
+  "oauth": [],
+  "apps": [],
+  "loggedIn": false,
+  "navigation": [
+    {
+      "id": "docs",
+      "name": "Docs",
+      "link": null,
+      "items": [
+        {
+          "id": "taxodactyl",
+          "name": "Taxodactyl",
+          "link": "#!pages/taxodactyl",
+          "items": null
+        }
+      ]
+    },
+    {
+      "id": "input_validation",
+      "name": "Tools",
+      "link": null,
+      "items": [
+        {
+          "id": "taxodactyl_validation",
+          "name": "Taxodactyl input validation",
+          "link": "/validation/",
+          "items": null
+        }
+      ]
+    }
+  ],
+  "maintenace": false
+}

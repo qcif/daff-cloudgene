@@ -31,3 +31,8 @@ These get symlinked into the repo directory for each workflow, for example:
 # Note that this should not get committed to the taxodactyl git, this dir should be an archive, not a git clone:
 taxodactyl.yml -> /mnt/data/apps/taxodactyl/v1.3.3-1/cloudgene.yml
 ```
+
+## ./uploader/ - Azure Blob Uploader
+
+This service allows authenticated users to upload input data directly to Azure
+Blob storage.

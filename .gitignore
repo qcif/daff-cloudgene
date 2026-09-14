@@ -2,4 +2,10 @@
 __pycache__/
 *.pyc
 .env
+.env.*
+*.pem
+*.key
 venv/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
