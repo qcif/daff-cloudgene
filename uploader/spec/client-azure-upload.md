@@ -343,7 +343,16 @@ Configure a CORS rule on the Blob service:
 - **Allowed methods:** `PUT` and `OPTIONS`. Add `GET` and `HEAD` only if the
   frontend also reads blobs directly.
 - **Allowed headers:** `x-ms-blob-type`, `x-ms-blob-content-type`,
-  `content-type`, `content-length`. The SDK sets these.
+  `content-type`, `content-length`, `x-ms-version`,
+  `x-ms-client-request-id`, `x-ms-useragent`. The SDK sets these.
+  **Corrected 2026-09-15** (see
+  [`tasks/06-mock-azure.md`](tasks/06-mock-azure.md) §4): the last three
+  were missing from this list. `x-ms-version` and `x-ms-client-request-id`
+  were found by measuring the SDK's outgoing calls; `x-ms-useragent` (SDK
+  telemetry) only turned up once that measurement was followed by an
+  actual end-to-end run in a real browser — a real preflight is stricter
+  than reading the SDK's request-building code. The original list would
+  have failed preflight in production.
 - **Exposed headers:** `etag`, `x-ms-request-id`. Needed if the client reads the
   ETag to confirm the committed blob.
 - **Max age:** one hour, to cache preflights.

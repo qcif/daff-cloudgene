@@ -38,7 +38,7 @@ out by `store.expire_pending()`, run opportunistically on every `POST
 | `cloudgene_auth.py` | Forwards the token to Cloudgene; interprets `loggedIn`/`apps`/`user.mail` |
 | `naming.py` | `<email>/<client path>` blob paths; traversal defence (3 layers) |
 | `storage.py` | SQLite (WAL) table of upload records; rate-limit queries, expiry sweep |
-| `azure_sas.py` | `SasIssuer`/`BlobReader` protocols; real (cert-based) and fake issuers |
+| `azure_sas.py` | `SasIssuer`/`BlobReader`/`BlobLister` protocols; real (cert-based), fake and local-filesystem issuers |
 | `config.py` | Env loading; raises at startup on anything missing (fail-fast, not fail-open) |
 
 ## The trust boundary that matters
@@ -75,7 +75,13 @@ hour before expiry), with exactly one retry on a signing failure.
 `UPLOADER_SAS_ISSUER=fake` swaps in `FakeSasIssuer`, which emits
 structurally identical but unsigned SAS query strings and keeps an in-memory
 blob table — everything except a real Azure call is testable without
-credentials.
+credentials. `UPLOADER_SAS_ISSUER=local` swaps in `LocalFileSasIssuer`,
+backed by a real directory instead of an in-memory table: a separate
+`uploader/devblob` process implements the two `PUT` requests the client
+actually issues, so the byte transfer itself — progress, reconciliation,
+the `az://` listing, the create-only `409` — works fully offline. See
+[`../devblob/README.md`](../devblob/README.md) and
+[`tasks/06-mock-azure.md`](tasks/06-mock-azure.md).
 
 ## Not yet built
 

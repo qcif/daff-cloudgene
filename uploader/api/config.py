@@ -45,7 +45,8 @@ DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 ISSUER_AZURE = "azure"
 ISSUER_FAKE = "fake"
-VALID_ISSUERS = (ISSUER_AZURE, ISSUER_FAKE)
+ISSUER_LOCAL = "local"
+VALID_ISSUERS = (ISSUER_AZURE, ISSUER_FAKE, ISSUER_LOCAL)
 
 ENV_ISSUER = "UPLOADER_SAS_ISSUER"
 ENV_STORAGE_ACCOUNT = "AZURE_STORAGE_ACCOUNT"
@@ -62,6 +63,8 @@ ENV_ALLOWED_EXTENSIONS = "UPLOADER_ALLOWED_EXTENSIONS"
 ENV_ALLOWED_CONTENT_TYPES = "UPLOADER_ALLOWED_CONTENT_TYPES"
 ENV_MAX_LIST_RESULTS = "UPLOADER_MAX_LIST_RESULTS"
 ENV_MAX_RENEWALS = "UPLOADER_MAX_RENEWALS"
+ENV_LOCAL_BLOB_ROOT = "UPLOADER_LOCAL_BLOB_ROOT"
+ENV_LOCAL_BLOB_ENDPOINT = "UPLOADER_LOCAL_BLOB_ENDPOINT"
 
 DEFAULT_DATABASE_PATH = "uploads.sqlite3"
 DEFAULT_MAX_UPLOAD_BYTES = 500 * 1024 * 1024 * 1024
@@ -70,6 +73,8 @@ DEFAULT_RATE_LIMIT_MAX = 200
 DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
 DEFAULT_MAX_LIST_RESULTS = 1000
 DEFAULT_MAX_RENEWALS = 10
+DEFAULT_LOCAL_BLOB_ROOT = "/tmp/uploader-blobs"
+DEFAULT_LOCAL_BLOB_ENDPOINT = "http://127.0.0.1:8004"
 
 # Both allowlists are advisory only (§10 of the spec): a SAS constrains the
 # blob, never its contents. They reject the obvious mistakes cheaply.
@@ -134,6 +139,8 @@ class Config:
     allowed_content_types: frozenset
     max_list_results: int
     max_renewals: int
+    local_blob_root: Path
+    local_blob_endpoint: str
 
     @property
     def blob_endpoint(self) -> str:
@@ -232,6 +239,44 @@ def _certificate_path(env: dict) -> Path:
     return path
 
 
+def _local_blob_root(env: dict, issuer: str) -> Path:
+    """Return the local filesystem blob store's root.
+
+    Honoured only when ``issuer`` is :data:`ISSUER_LOCAL` — for every other
+    issuer the setting has no effect, so a root that does not yet exist must
+    not block startup of the azure or fake issuer. Only when the local
+    issuer is actually selected is the directory proven writable, per §4.8
+    of the task brief: a stand-in that cannot write must refuse to start,
+    not fail on the first upload.
+    """
+    raw = (
+        (env.get(ENV_LOCAL_BLOB_ROOT) or "").strip()
+        or DEFAULT_LOCAL_BLOB_ROOT
+    )
+    path = Path(raw).expanduser()
+
+    if issuer != ISSUER_LOCAL:
+        return path
+
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".uploader-write-test"
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError as exc:
+        raise ConfigError(
+            f"{ENV_LOCAL_BLOB_ROOT} points at {path}, which could not be "
+            f"created or written to: {exc.__class__.__name__}") from exc
+
+    return path
+
+
+def _local_blob_endpoint(env: dict) -> str:
+    """Return the host the local issuer embeds in its SAS URLs."""
+    raw = (env.get(ENV_LOCAL_BLOB_ENDPOINT) or "").strip()
+    return raw or DEFAULT_LOCAL_BLOB_ENDPOINT
+
+
 def load_config(env: dict = None) -> Config:
     """Read, validate and freeze the process configuration.
 
@@ -296,6 +341,8 @@ def load_config(env: dict = None) -> Config:
             env, ENV_MAX_LIST_RESULTS, DEFAULT_MAX_LIST_RESULTS),
         max_renewals=_positive_int(
             env, ENV_MAX_RENEWALS, DEFAULT_MAX_RENEWALS),
+        local_blob_root=_local_blob_root(env, issuer),
+        local_blob_endpoint=_local_blob_endpoint(env),
     )
 
 
@@ -319,4 +366,6 @@ def redact(config: Config) -> dict:
         "rate_limit_window_seconds": config.rate_limit_window_seconds,
         "max_list_results": config.max_list_results,
         "max_renewals": config.max_renewals,
+        "local_blob_root": str(config.local_blob_root),
+        "local_blob_endpoint": config.local_blob_endpoint,
     }

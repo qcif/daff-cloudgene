@@ -36,10 +36,12 @@ loop: a genuine credential failure should surface as a 503, not as a
 hot retry against Entra ID.
 """
 
+import json
 import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Protocol
 
 from azure.core.exceptions import AzureError, ResourceNotFoundError
@@ -352,6 +354,138 @@ class AzureUserDelegationSasIssuer:
                 f"Could not list blobs: {exc.__class__.__name__}") from exc
 
 
+LOCAL_STAGED_DIRNAME = ".staged"
+LOCAL_META_SUFFIX = ".meta"
+
+
+class LocalFileSasIssuer:
+    """A stand-in backed by a real directory, for exercising the byte
+    transfer offline (``uploader/spec/tasks/06-mock-azure.md``).
+
+    ``FakeSasIssuer`` with its in-memory ``self._blobs`` dict replaced by
+    the filesystem: a real ``uploader/devblob`` process (a separate ASGI
+    app — see that module's README for why) writes committed blobs and
+    ``.meta`` sidecars under ``root`` in response to the browser's
+    ``BlockBlobClient`` calls, and this class reads them back the same way
+    the real Azure issuer reads Azure. It does not import
+    ``uploader/devblob`` and ``uploader/devblob`` does not import this
+    module — each knows the on-disk layout independently, which is the
+    price of ``uploader/api/**`` structurally never importing the dev-only
+    process.
+
+    Selected only by ``UPLOADER_SAS_ISSUER=local``. Never the default: a
+    host that forgets the variable gets a service that will not start, not
+    one that quietly writes to a local directory instead of Azure.
+    """
+
+    def __init__(
+        self,
+        account_name: str,
+        container_name: str,
+        root,
+        endpoint: str,
+    ):
+        self.account_name = account_name
+        self.container_name = container_name
+        self.root = Path(root)
+        self.endpoint = endpoint.rstrip("/")
+
+    def issue(self, blob_path: str, expiry: datetime) -> IssuedSas:
+        """Return a well-formed but unsigned SAS pointing at the local
+        endpoint rather than Azure."""
+        start = sas_start_time()
+        token = "&".join([
+            f"sv={FAKE_SAS_VERSION}",
+            "sr=b",
+            f"sp={BlobSasPermissions(create=True)}",
+            f"st={_sas_timestamp(start)}",
+            f"se={_sas_timestamp(expiry)}",
+            f"spr={SAS_PROTOCOL_HTTPS}",
+            f"sig={FAKE_SAS_SIGNATURE}",
+        ])
+        return IssuedSas(
+            blob_url=f"{self.endpoint}/{self.container_name}/{blob_path}",
+            sas_token=token,
+            expires_at=expiry,
+        )
+
+    def _resolve(self, blob_path: str) -> Path:
+        """Return ``blob_path`` joined onto ``root``, or ``None``.
+
+        ``blob_path`` normally reaches this class only after
+        ``naming.build_blob_path`` has already proven it cannot escape a
+        user's prefix, but this is a belt-and-braces check of the same
+        shape naming.py itself uses: refuse anything that would resolve
+        outside ``root``, rather than trust every caller to have validated
+        first.
+        """
+        candidate = (self.root / blob_path).resolve()
+        root_resolved = self.root.resolve()
+        escapes = (
+            candidate != root_resolved
+            and root_resolved not in candidate.parents)
+        return None if escapes else candidate
+
+    def get_blob_properties(self, blob_path: str) -> BlobProperties:
+        """Return the real file's size, mtime and sidecar content type."""
+        target = self._resolve(blob_path)
+        if target is None or not target.is_file():
+            return None
+
+        content_type = None
+        meta_path = target.with_name(target.name + LOCAL_META_SUFFIX)
+        if meta_path.is_file():
+            try:
+                content_type = json.loads(
+                    meta_path.read_text()).get("content_type")
+            except (OSError, ValueError):
+                content_type = None
+
+        stat_result = target.stat()
+        return BlobProperties(
+            size=stat_result.st_size,
+            content_type=content_type,
+            last_modified=datetime.fromtimestamp(
+                stat_result.st_mtime, tz=timezone.utc),
+        )
+
+    def list_blobs(self, prefix: str) -> list:
+        """Walk the root, excluding staged blocks and ``.meta`` sidecars.
+
+        Azure does not list a blob until its blocks are committed, so the
+        ``.staged/`` tree — where ``uploader/devblob`` keeps uncommitted
+        blocks — is excluded here the same way it would be absent from a
+        real container listing.
+        """
+        if not self.root.is_dir():
+            return []
+
+        results = []
+        for path in self.root.rglob("*"):
+            if not path.is_file():
+                continue
+
+            relative = path.relative_to(self.root)
+            if relative.parts and relative.parts[0] == LOCAL_STAGED_DIRNAME:
+                continue
+
+            blob_path = relative.as_posix()
+            if blob_path.endswith(LOCAL_META_SUFFIX):
+                continue
+            if not blob_path.startswith(prefix):
+                continue
+
+            properties = self.get_blob_properties(blob_path)
+            results.append(ListedBlob(
+                blob_path=blob_path,
+                size=properties.size,
+                content_type=properties.content_type,
+                last_modified=properties.last_modified,
+            ))
+
+        return sorted(results, key=lambda blob: blob.blob_path)
+
+
 class FakeSasIssuer:
     """A stand-in for tests and for local development without credentials.
 
@@ -449,6 +583,18 @@ def create_issuer(config) -> SasIssuer:
         return FakeSasIssuer(
             account_name=config.storage_account,
             container_name=config.storage_container,
+        )
+
+    if config.issuer == config_module.ISSUER_LOCAL:
+        logger.warning(
+            "Using the LOCAL filesystem SAS issuer; uploads land under %s "
+            "on this host, not Azure. This must not be the configuration "
+            "in production.", config.local_blob_root)
+        return LocalFileSasIssuer(
+            account_name=config.storage_account,
+            container_name=config.storage_container,
+            root=config.local_blob_root,
+            endpoint=config.local_blob_endpoint,
         )
 
     if config.issuer == config_module.ISSUER_AZURE:

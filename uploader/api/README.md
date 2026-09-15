@@ -73,7 +73,7 @@ Optional:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `UPLOADER_SAS_ISSUER` | `azure` | `fake` for local development |
+| `UPLOADER_SAS_ISSUER` | `azure` | `fake` for local development with no real byte transfer; `local` for local development where uploads really land on disk — see [`../devblob/README.md`](../devblob/README.md) |
 | `UPLOADER_AUTH_PROVIDER` | `cloudgene` | `fake` answers auth from `tests/fixtures/` instead of calling Cloudgene, and skips the startup contract check. Local development only; **refused at startup** alongside `UPLOADER_SAS_ISSUER=azure` |
 | `CLOUDGENE_BASE_URL` | `https://cloudgene.qcif.edu.au` | Set to `http://127.0.0.1:8082` in production |
 | `UPLOADER_DB_PATH` | `uploads.sqlite3` | Relative to the working directory |
@@ -85,6 +85,8 @@ Optional:
 | `UPLOADER_ALLOWED_CONTENT_TYPES` | see `config.py` | Comma-separated |
 | `UPLOADER_MAX_LIST_RESULTS` | `1000` | Cap on `GET /files`; excess sets `truncated` rather than paginating |
 | `UPLOADER_MAX_RENEWALS` | `10` | Per-record cap on `POST /uploads/{id}/renew` |
+| `UPLOADER_LOCAL_BLOB_ROOT` | `/tmp/uploader-blobs` | Honoured only when `UPLOADER_SAS_ISSUER=local`. Where blobs land; proven writable at startup |
+| `UPLOADER_LOCAL_BLOB_ENDPOINT` | `http://127.0.0.1:8004` | Honoured only when `UPLOADER_SAS_ISSUER=local`. Host embedded in issued SAS URLs — the `uploader/devblob` process |
 | `UPLOADER_LOG_LEVEL` | `INFO` | |
 
 The three Azure credentials are supplied by an `EnvironmentFile` outside the

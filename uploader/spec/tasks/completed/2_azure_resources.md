@@ -159,13 +159,32 @@ middleware has no bearing on requests the browser makes to
 |---|---|
 | Allowed origins | `https://cloudgene.qcif.edu.au` — exactly this, not `*` |
 | Allowed methods | `PUT`, `OPTIONS` (add `GET`/`HEAD` only if the client reads blobs directly) |
-| Allowed headers | `x-ms-blob-type`, `x-ms-blob-content-type`, `content-type`, `content-length` |
+| Allowed headers | `x-ms-blob-type`, `x-ms-blob-content-type`, `content-type`, `content-length`, **`x-ms-version`, `x-ms-client-request-id`** |
 | Exposed headers | `etag`, `x-ms-request-id` |
 | Max age | 3600 |
 
 A failed preflight surfaces in the browser as an opaque network error with no
 useful detail, so this is worth verifying in isolation before debugging any
 upload logic.
+
+> **Escalated 2026-09-15, from
+> [`06-mock-azure.md`](../06-mock-azure.md) §4:** the Allowed headers row
+> above is missing headers. Measuring the actual requests the bundled SDK
+> issues (`BlockBlobClient` against a plain HTTP host) showed every `PUT`
+> carrying `x-ms-version` and `x-ms-client-request-id`, and both appear in
+> the preflight's `Access-Control-Request-Headers`. Neither was in the
+> original list above, which as written would fail preflight in
+> production — surfacing as exactly the opaque network error warned about
+> two paragraphs up. **A live end-to-end run against a real browser (the
+> §9 verification of `06-mock-azure.md`) turned up a third, missed for the
+> same reason: `x-ms-useragent`** — client telemetry (SDK, pipeline and
+> browser versions) the SDK also sets on every request unconditionally.
+> Static measurement of the SDK's outgoing calls did not catch it; only
+> driving a real preflight in a real browser did. **All three bolded
+> headers need to be added to the Allowed headers list when this rule is
+> applied.** The local dev stand-in (`uploader/devblob/`) already accepts
+> the full set, so this only affects the real storage account, which has
+> not had this rule applied yet.
 
 ## 5. Network egress from the Cloudgene server
 

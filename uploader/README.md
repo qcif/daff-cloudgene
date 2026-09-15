@@ -130,21 +130,44 @@ to prove it.
 
 ### What can and cannot be exercised locally
 
-With both fakes running, the page comes fully to life as far as Azure: the
+With `UPLOADER_SAS_ISSUER=fake`, the page comes to life as far as Azure: the
 file picker and its accept list, client-side validation and its rejection
 messages, the existing-files list, `POST /uploads`, and every auth state the
-UI has to render.
+UI has to render. What does **not** work is the byte transfer —
+`FakeSasIssuer` builds its URLs from the real blob endpoint, so the browser
+stages blocks against `daffstandard.blob.core.windows.net` with an unsigned
+signature and gets a `403`.
 
-What still does **not** work is the byte transfer. `FakeSasIssuer` builds
-its URLs from the real blob endpoint, so the browser stages blocks against
-`daffstandard.blob.core.windows.net` with an unsigned signature and gets a
-`403`. Progress, reconciliation and the `az://` results list are therefore
-unreachable locally — that is the one part still needing a manual check
-against real credentials once the container is reachable.
+**`UPLOADER_SAS_ISSUER=local` closes that gap.** It points the browser at a
+real local directory instead: a third process,
+[`devblob/server.py`](devblob/server.py), implements the two `PUT` requests
+`BlockBlobClient` actually issues (block staging and the block-list commit)
+over a plain filesystem directory, and `LocalFileSasIssuer` reads the same
+bytes back for reconciliation and listing. Progress, reconciliation, the
+`az://` results list and the create-only `409` all work offline, end to
+end. Use the **"Uploader: full stack (offline, real uploads)"** launch
+compound, which starts all three processes.
 
-Closing that gap would mean running Azurite and a third issuer that signs
-with its well-known key, plus relaxing the deliberately hardcoded blob
-endpoint in `config.py`. Deliberately not done.
+It is not an Azure emulator — see [`devblob/README.md`](devblob/README.md)
+and [`spec/tasks/06-mock-azure.md`](spec/tasks/06-mock-azure.md) for what it
+does and does not reproduce. Still only verifiable against the real
+storage account:
+
+- **Real SAS signature validation.** Both fakes emit a structurally correct
+  but unsigned token; nothing locally ever checks a signature.
+- **The real storage account's CORS rule.** The local stand-in configures
+  its own CORS to accept the dev origin; that says nothing about whether
+  the rule actually applied to `*.blob.core.windows.net` is correct — see
+  the discrepancy flagged in
+  [`spec/tasks/06-mock-azure.md`](spec/tasks/06-mock-azure.md) §4.
+- **Azure's seven-day garbage collection of uncommitted blocks.** The local
+  stand-in never deletes an abandoned staged block; Azure does, after seven
+  days.
+
+Running Azurite instead — exact protocol fidelity, real SAS signing with
+its well-known key — was considered and rejected: it needs Docker and
+relaxing the deliberately hardcoded blob endpoint in `config.py`, for a
+two-request wire surface that does not need that much fidelity.
 
 ## Tests
 

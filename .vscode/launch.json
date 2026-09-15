@@ -78,6 +78,54 @@
       }
     },
     {
+      // The third fake: a real filesystem directory standing in for the
+      // Azure container. Runs as its own process on its own origin (never
+      // mounted inside app.py — see uploader/devblob/README.md for why),
+      // implementing just the two PUT requests BlockBlobClient actually
+      // issues. Pair with "Uploader API (local blob store + fake auth,
+      // offline)" below for a real, offline byte transfer.
+      "name": "Uploader dev blob store (local filesystem)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["server:app", "--host", "127.0.0.1", "--port", "8004"],
+      "cwd": "${workspaceFolder}/uploader/devblob",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "env": {
+        "UPLOADER_LOCAL_BLOB_ROOT": "/tmp/uploader-blobs",
+        "UPLOADER_DEV_ORIGIN": "http://localhost:5173"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Fully offline, and the byte transfer actually works: blocks and
+      // the block-list commit land on disk under UPLOADER_LOCAL_BLOB_ROOT,
+      // read back by LocalFileSasIssuer, instead of getting a 403 from
+      // daffstandard.blob.core.windows.net. Pair with "Uploader dev blob
+      // store (local filesystem)" above — see the "full stack (offline,
+      // real uploads)" compound below.
+      "name": "Uploader API (local blob store + fake auth, offline)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--host", "127.0.0.1", "--port", "8003"],
+      "cwd": "${workspaceFolder}/uploader/api",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "env": {
+        "UPLOADER_SAS_ISSUER": "local",
+        "UPLOADER_AUTH_PROVIDER": "fake",
+        "AZURE_STORAGE_ACCOUNT": "daffstandard",
+        "AZURE_STORAGE_CONTAINER": "uploads",
+        "UPLOADER_LOCAL_BLOB_ROOT": "/tmp/uploader-blobs",
+        "UPLOADER_LOCAL_BLOB_ENDPOINT": "http://127.0.0.1:8004",
+        "UPLOADER_DB_PATH": "/tmp/uploads-local.sqlite3",
+        "UPLOADER_LOG_LEVEL": "DEBUG"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       // Real Azure: reads AZURE_TENANT_ID, AZURE_CLIENT_ID and
       // AZURE_CLIENT_CERTIFICATE_PATH from uploader/.env (gitignored). This
       // signs SAS tokens Azure will actually accept and writes to the real
@@ -149,16 +197,33 @@
   ],
   "compounds": [
     {
-      // The one to use day to day: needs no network, no Azure credentials
-      // and no real Cloudgene session. Requires VITE_DEV_TOKEN in
-      // uploader/client/.env.local — see uploader/README.md.
+      // The day-to-day one: needs no network, no Azure credentials and no
+      // real Cloudgene session, and the byte transfer actually works —
+      // files really land under UPLOADER_LOCAL_BLOB_ROOT, progress and
+      // reconciliation are real, and the existing-files list reads real
+      // bytes. Requires VITE_DEV_TOKEN in uploader/client/.env.local — see
+      // uploader/README.md.
+      "name": "Uploader: full stack (offline, real uploads)",
+      "configurations": [
+        "Uploader dev blob store (local filesystem)",
+        "Uploader API (local blob store + fake auth, offline)",
+        "Uploader client (Chrome)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "uploader", "order": 1 }
+    },
+    {
+      // Same auth and client, but the fake issuer: no byte transfer, since
+      // FakeSasIssuer's URLs point at the real (unreachable without a
+      // valid signature) blob endpoint. Kept for tests and for starting
+      // the API alone without also running the dev blob store.
       "name": "Uploader: full stack (offline)",
       "configurations": [
         "Uploader API (fake SAS + fake auth, offline)",
         "Uploader client (Chrome)"
       ],
       "stopAll": true,
-      "presentation": { "group": "uploader", "order": 1 }
+      "presentation": { "group": "uploader", "order": 2 }
     },
     {
       // Fake SAS, but auth validated against the real Cloudgene — so this
@@ -170,7 +235,7 @@
         "Uploader client (Chrome)"
       ],
       "stopAll": true,
-      "presentation": { "group": "uploader", "order": 2 }
+      "presentation": { "group": "uploader", "order": 3 }
     }
   ]
 }

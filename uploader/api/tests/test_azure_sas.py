@@ -19,6 +19,8 @@ accepts the credential, whether the role assignment is sufficient for
 signature.
 """
 
+import json
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -31,17 +33,22 @@ import azure_sas
 from azure_sas import (
     DELEGATION_KEY_LIFETIME,
     DELEGATION_KEY_REFRESH_MARGIN,
+    LOCAL_META_SUFFIX,
+    LOCAL_STAGED_DIRNAME,
     SAS_PROTOCOL_HTTPS,
     SAS_START_SKEW,
     AzureUserDelegationSasIssuer,
     FakeSasIssuer,
     IssuedSas,
+    LocalFileSasIssuer,
     SasError,
     create_issuer,
     sas_start_time,
 )
-from config import Config, ISSUER_AZURE, ISSUER_FAKE
+from config import Config, ISSUER_AZURE, ISSUER_FAKE, ISSUER_LOCAL
 from pathlib import Path
+
+LOCAL_ENDPOINT = "http://127.0.0.1:8004"
 
 ACCOUNT = "daffstandard"
 CONTAINER = "uploads"
@@ -49,7 +56,7 @@ BLOB_PATH = "chyde@neoformit.com/run7/reads.fastq.gz"
 SIGNED_TOKEN = "sv=2024-11-04&sr=b&sp=c&sig=abc"
 
 
-def make_config(issuer: str) -> Config:
+def make_config(issuer: str, local_blob_root: Path = None) -> Config:
     """Return a config with only the fields this module reads."""
     return Config(
         issuer=issuer,
@@ -67,6 +74,8 @@ def make_config(issuer: str) -> Config:
         allowed_content_types=frozenset({"application/gzip"}),
         max_list_results=1000,
         max_renewals=10,
+        local_blob_root=local_blob_root or Path("/tmp/uploader-blobs"),
+        local_blob_endpoint=LOCAL_ENDPOINT,
     )
 
 
@@ -199,6 +208,114 @@ class TestFakeSasIssuer(unittest.TestCase):
         self.issuer.put_blob(BLOB_PATH, size=1, content_type="text/plain")
         listed = self.issuer.list_blobs("chyde@neoformit.com/")
         self.assertIsNotNone(listed[0].last_modified)
+
+
+class TestLocalFileSasIssuer(unittest.TestCase):
+    """§8 of ``06-mock-azure.md``.
+
+    These tests write directly to the filesystem to simulate what
+    ``uploader/devblob`` would have committed, then exercise only the
+    issuer's read side (``issue``, ``get_blob_properties``,
+    ``list_blobs``) — the store/server write path is covered separately
+    in ``uploader/devblob/tests/``.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.issuer = LocalFileSasIssuer(
+            account_name=ACCOUNT,
+            container_name=CONTAINER,
+            root=self.root,
+            endpoint=LOCAL_ENDPOINT,
+        )
+
+    def _write_committed_blob(
+        self, blob_path: str, data: bytes, content_type: str = None,
+    ):
+        target = self.root / blob_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        if content_type is not None:
+            meta = target.with_name(target.name + LOCAL_META_SUFFIX)
+            meta.write_text(json.dumps({"content_type": content_type}))
+
+    def test_issued_url_points_at_the_local_endpoint(self):
+        issued = self.issuer.issue(BLOB_PATH, expiry_in())
+        self.assertTrue(issued.blob_url.startswith(
+            f"{LOCAL_ENDPOINT}/{CONTAINER}/"))
+        self.assertTrue(issued.blob_url.endswith(BLOB_PATH))
+
+    def test_issued_sas_has_the_same_shape_as_the_fake_issuer(self):
+        issued = self.issuer.issue(BLOB_PATH, expiry_in())
+        query = {
+            k: v[0] for k, v in parse_qs(issued.sas_token).items()
+        }
+        self.assertEqual(query["sr"], "b")
+        self.assertEqual(query["sp"], "c")
+
+    def test_round_trip_commit_read_and_list(self):
+        self._write_committed_blob(
+            BLOB_PATH, b"hello world", content_type="text/plain")
+
+        properties = self.issuer.get_blob_properties(BLOB_PATH)
+        self.assertEqual(properties.size, 11)
+        self.assertEqual(properties.content_type, "text/plain")
+
+        listed = self.issuer.list_blobs("chyde@neoformit.com/")
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].blob_path, BLOB_PATH)
+        self.assertEqual(listed[0].size, 11)
+
+    def test_unknown_blob_has_no_properties(self):
+        self.assertIsNone(self.issuer.get_blob_properties(BLOB_PATH))
+
+    def test_missing_sidecar_gives_no_content_type(self):
+        self._write_committed_blob(BLOB_PATH, b"data")
+        properties = self.issuer.get_blob_properties(BLOB_PATH)
+        self.assertIsNone(properties.content_type)
+
+    def test_listing_returns_only_the_caller_prefix(self):
+        self._write_committed_blob("alice@example.com/a.txt", b"a")
+        self._write_committed_blob("bob@example.com/b.txt", b"b")
+
+        listed = self.issuer.list_blobs("alice@example.com/")
+
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].blob_path, "alice@example.com/a.txt")
+
+    def test_listing_prefix_does_not_match_a_similar_email(self):
+        # bob@example.com must not match bob@example.com.au/...: the same
+        # trailing-slash invariant as GET /files.
+        self._write_committed_blob("bob@example.com/secret.txt", b"s")
+        self._write_committed_blob("bob@example.com.au/other.txt", b"o")
+
+        listed = self.issuer.list_blobs("bob@example.com/")
+
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].blob_path, "bob@example.com/secret.txt")
+
+    def test_staged_blocks_never_appear_in_a_listing(self):
+        staged = self.root / LOCAL_STAGED_DIRNAME / BLOB_PATH / "block-0"
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(b"uncommitted")
+
+        self.assertEqual(self.issuer.list_blobs(""), [])
+
+    def test_meta_sidecar_never_appears_in_a_listing(self):
+        self._write_committed_blob(
+            BLOB_PATH, b"data", content_type="text/plain")
+        blob_paths = [blob.blob_path for blob in self.issuer.list_blobs("")]
+        self.assertEqual(blob_paths, [BLOB_PATH])
+
+    def test_a_traversal_attempt_is_refused_rather_than_escaping_root(self):
+        outside = self.root.parent / "escaped-devblob-test-file"
+        self.addCleanup(lambda: outside.unlink(missing_ok=True))
+        outside.write_bytes(b"should not be reachable")
+
+        self.assertIsNone(
+            self.issuer.get_blob_properties("../escaped-devblob-test-file"))
 
 
 class AzureIssuerTestCase(unittest.TestCase):
@@ -428,6 +545,12 @@ class TestCreateIssuer(unittest.TestCase):
     def test_fake_is_selected_only_when_asked_for(self):
         issuer = create_issuer(make_config(ISSUER_FAKE))
         self.assertIsInstance(issuer, FakeSasIssuer)
+
+    def test_local_is_selected_only_when_asked_for(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            issuer = create_issuer(
+                make_config(ISSUER_LOCAL, local_blob_root=Path(tmp)))
+        self.assertIsInstance(issuer, LocalFileSasIssuer)
 
     def test_azure_is_the_default_selection(self):
         issuer = create_issuer(make_config(ISSUER_AZURE))
