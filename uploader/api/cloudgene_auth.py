@@ -30,10 +30,15 @@ confirmed by the operator. Once it is, set
 and DNS from the request path.
 """
 
+import json
+import logging
 import os
 import re
+from pathlib import Path
 
 import requests
+
+logger = logging.getLogger("uploader")
 
 CLOUDGENE_PUBLIC_BASE_URL = "https://cloudgene.qcif.edu.au"
 CLOUDGENE_LOOPBACK_BASE_URL = "http://127.0.0.1:8082"
@@ -43,6 +48,44 @@ AUTH_TOKEN_HEADER = "X-Auth-Token"
 REQUEST_TIMEOUT_SECONDS = 5.0
 MAX_TOKEN_LENGTH = 8192
 RX_ILLEGAL_HEADER_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+# Local development without a real Cloudgene session. See §"Local
+# development" in ../README.md. 'cloudgene' is the default: a host that
+# forgets the variable validates against the real server, never against a
+# table of canned answers.
+AUTH_PROVIDER_ENV_VAR = "UPLOADER_AUTH_PROVIDER"
+AUTH_PROVIDER_CLOUDGENE = "cloudgene"
+AUTH_PROVIDER_FAKE = "fake"
+VALID_AUTH_PROVIDERS = (AUTH_PROVIDER_CLOUDGENE, AUTH_PROVIDER_FAKE)
+
+# The fake provider answers from the response bodies recorded against
+# production on 2026-09-14 — the same files test_cloudgene_auth.py asserts
+# against, so the two cannot drift. It substitutes for the HTTP call only;
+# the verdict still comes from interpret_server_info() below, which is the
+# code that actually holds the trust boundary.
+FIXTURES_PATH = Path(__file__).resolve().parent / "tests" / "fixtures"
+FIXTURE_ANONYMOUS = "anonymous.json"
+FIXTURE_AUTHORISED = "authorised.json"
+FIXTURE_UNENTITLED = "unentitled.json"
+
+FAKE_TOKEN_FIXTURES = {
+    "dev-authorised": FIXTURE_AUTHORISED,
+    "dev-unentitled": FIXTURE_UNENTITLED,
+}
+
+# Synthesised rather than recorded: no account in the captures had a null
+# mail, and this is the one denial a user can fix themselves (403, message
+# surfaced verbatim), so it is worth being able to see in the UI.
+FAKE_TOKEN_NO_EMAIL = "dev-no-email"
+
+
+class AuthProviderError(Exception):
+    """``UPLOADER_AUTH_PROVIDER`` names something that is not a provider.
+
+    Raised at startup only. Refusing to start beats guessing which provider
+    was meant, since one of the two answers questions without asking
+    Cloudgene at all.
+    """
 
 
 class CloudgeneAuthError(Exception):
@@ -103,6 +146,61 @@ def get_base_url() -> str:
     ).rstrip("/")
 
 
+def get_auth_provider() -> str:
+    """Return the configured auth provider, or raise.
+
+    Read from the environment on each call rather than cached, for the same
+    reason :func:`get_base_url` is: it keeps this module free of import-time
+    state that a test would then have to work around.
+    """
+    value = (os.environ.get(AUTH_PROVIDER_ENV_VAR)
+             or AUTH_PROVIDER_CLOUDGENE).strip().lower()
+
+    if value not in VALID_AUTH_PROVIDERS:
+        raise AuthProviderError(
+            f"{AUTH_PROVIDER_ENV_VAR} must be one of "
+            f"{', '.join(VALID_AUTH_PROVIDERS)}, got {value!r}")
+
+    return value
+
+
+def _load_fixture(name: str) -> dict:
+    """Return a recorded ``/api/v2/server`` body from ``tests/fixtures``."""
+    path = FIXTURES_PATH / name
+
+    try:
+        with path.open(encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError) as exc:
+        # Only reachable with the fake provider selected, which is never the
+        # default — so this is a broken dev checkout, not a user-facing
+        # outage. Say which file, because that is the whole diagnosis.
+        raise CloudgeneUnavailableError(
+            f"The fake auth provider could not read {path}: "
+            f"{exc.__class__.__name__}") from exc
+
+
+def _fake_server_info(token: str) -> dict:
+    """Return the canned ``/api/v2/server`` body for a dev token.
+
+    Any unrecognised token — including a plausible-looking JWT — resolves to
+    the *anonymous* body, which is an HTTP 200 carrying ``loggedIn: false``.
+    That is what the real endpoint was observed to do for absent, garbage and
+    forged tokens alike, and reproducing it is the point: a fake that
+    answered 401 here would let a client regression through that only
+    appeared in production.
+    """
+    if token == FAKE_TOKEN_NO_EMAIL:
+        data = _load_fixture(FIXTURE_AUTHORISED)
+        # Null, not absent: a missing 'mail' key is a contract violation
+        # (503), whereas a null one is the account state this token exists
+        # to reproduce (403, and the user can fix it themselves).
+        data["user"]["mail"] = None
+        return data
+
+    return _load_fixture(FAKE_TOKEN_FIXTURES.get(token, FIXTURE_ANONYMOUS))
+
+
 def _assert_sendable(auth_token: str) -> str:
     """Reject tokens that must not be placed in a request header.
 
@@ -140,6 +238,14 @@ def fetch_server_info(
             object.
     """
     token = _assert_sendable(auth_token)
+
+    # The fake provider substitutes for this function and nothing else. The
+    # token still has to survive _assert_sendable above, and the body it
+    # returns is still interpreted by interpret_server_info below, so the
+    # authorisation rule stays real code on this path.
+    if get_auth_provider() == AUTH_PROVIDER_FAKE:
+        return _fake_server_info(token)
+
     url = (base_url.rstrip("/") if base_url else get_base_url()) \
         + SERVER_ENDPOINT_PATH
 
@@ -262,7 +368,18 @@ def startup_self_test(base_url: str = None) -> None:
     response must still be an HTTP 200 JSON object carrying ``loggedIn:
     false`` and an empty ``apps`` list. Raises rather than returning a
     verdict, so a failed self-test stops the service instead of degrading it.
+
+    With the fake provider there is no endpoint to check and nothing to
+    learn, so the check is skipped — loudly. This is what lets the service
+    start with no network at all.
     """
+    if get_auth_provider() == AUTH_PROVIDER_FAKE:
+        logger.warning(
+            "Using the FAKE auth provider; no Cloudgene session is being "
+            "validated and the startup contract check is SKIPPED. This must "
+            "not be the configuration in production.")
+        return
+
     url = (base_url.rstrip("/") if base_url else get_base_url()) \
         + SERVER_ENDPOINT_PATH
 

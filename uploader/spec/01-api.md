@@ -79,8 +79,6 @@ credentials.
 
 ## Not yet built
 
-- `GET /uploads/api/files` (list a user's own prefix) — referenced in the
-  design spec, no route exists.
 - Deleting abandoned *committed* blobs (uncommitted blocks are
   garbage-collected by Azure automatically after 7 days and need no code) —
   see `tasks/2_azure_resources.md` §2.1.

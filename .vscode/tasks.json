@@ -1,0 +1,97 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Background task: the Vite dev server. Used as a preLaunchTask by the
+      // browser debug configs, which must not start until Vite is listening.
+      // The task stays running after the debug session ends — stop it from
+      // the terminal panel, or with Tasks: Terminate Task.
+      "label": "uploader: vite dev server",
+      "type": "npm",
+      "script": "dev",
+      "path": "uploader/client",
+      "isBackground": true,
+      "presentation": {
+        "group": "uploader",
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": {
+        "owner": "vite",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          // Vite prints "VITE v5.x ready in NNN ms" once it is serving.
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE\\s+v.*",
+          "endsPattern": ".*ready in.*"
+        }
+      }
+    },
+    {
+      "label": "uploader: npm install",
+      "type": "npm",
+      "script": "install",
+      "path": "uploader/client",
+      "presentation": { "group": "uploader", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      // Rebuilds client/dist/, which is committed and served directly by
+      // nginx — a source change without its rebuilt dist/ deploys nothing.
+      "label": "uploader: build client (dist/)",
+      "type": "npm",
+      "script": "build",
+      "path": "uploader/client",
+      "group": "build",
+      "presentation": { "group": "uploader", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "uploader: test client (vitest)",
+      "type": "npm",
+      "script": "test",
+      "path": "uploader/client",
+      "group": "test",
+      "presentation": { "group": "uploader", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      // unittest, not pytest. Must run from uploader/api so that the flat
+      // module imports (import app, import naming) resolve.
+      "label": "uploader: test api (unittest)",
+      "type": "shell",
+      "command": "${workspaceFolder}/uploader/venv/bin/python",
+      "args": ["-m", "unittest", "discover", "-s", "tests", "-t", "."],
+      "options": { "cwd": "${workspaceFolder}/uploader/api" },
+      "group": "test",
+      "presentation": { "group": "uploader", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "uploader: lint api (flake8)",
+      "type": "shell",
+      "command": "/home/cameron/.local/envs/claude/bin/flake8",
+      "args": ["uploader/api"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "group": "uploader", "reveal": "always" },
+      "problemMatcher": {
+        "owner": "flake8",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+): (\\w+\\d+) (.+)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "code": 4,
+          "message": 5
+        }
+      }
+    }
+  ]
+}

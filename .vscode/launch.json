@@ -1,0 +1,176 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // The backend, with the FAKE SAS issuer: no Azure credentials needed.
+      // The fake issuer emits structurally correct but unsigned SAS URLs and
+      // keeps an in-memory blob table, so everything except the real byte
+      // transfer to Azure can be exercised. See uploader/README.md.
+      //
+      // These values are set as real environment variables, which always win
+      // over uploader/.env (load_dotenv does not override) — so this config
+      // stays on the fake issuer regardless of what .env says.
+      //
+      // No --reload: the reloader forks a child process and breakpoints do
+      // not bind reliably in it. Use "Uploader API (no debugger, --reload)"
+      // when you want hot reload instead of breakpoints.
+      "name": "Uploader API (fake SAS issuer)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--host", "127.0.0.1", "--port", "8003"],
+      "cwd": "${workspaceFolder}/uploader/api",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "env": {
+        "UPLOADER_SAS_ISSUER": "fake",
+        "AZURE_STORAGE_ACCOUNT": "daffstandard",
+        "AZURE_STORAGE_CONTAINER": "uploads",
+        "UPLOADER_DB_PATH": "/tmp/uploads.sqlite3",
+        "UPLOADER_LOG_LEVEL": "DEBUG"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Fully offline: auth is answered from the recorded fixtures in
+      // api/tests/fixtures/ rather than by calling Cloudgene, and the
+      // startup contract check is skipped. Needs no network and no real
+      // session token.
+      //
+      // Pair with VITE_DEV_TOKEN=dev-authorised in
+      // uploader/client/.env.local. Use dev-unentitled / dev-no-email to see
+      // the 403 states, or any other string for the 401 path.
+      "name": "Uploader API (fake SAS + fake auth, offline)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--host", "127.0.0.1", "--port", "8003"],
+      "cwd": "${workspaceFolder}/uploader/api",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "env": {
+        "UPLOADER_SAS_ISSUER": "fake",
+        "UPLOADER_AUTH_PROVIDER": "fake",
+        "AZURE_STORAGE_ACCOUNT": "daffstandard",
+        "AZURE_STORAGE_CONTAINER": "uploads",
+        "UPLOADER_DB_PATH": "/tmp/uploads.sqlite3",
+        "UPLOADER_LOG_LEVEL": "DEBUG"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Same, but with uvicorn's reloader and no debugger attached. Startup
+      // still self-tests against CLOUDGENE_BASE_URL/api/v2/server and
+      // refuses to start if that endpoint's shape has changed, so this needs
+      // network access to cloudgene.qcif.edu.au.
+      "name": "Uploader API (no debugger, --reload)",
+      "type": "node-terminal",
+      "request": "launch",
+      // cwd must be uploader/api: the backend uses flat module imports, so
+      // "app:app" only resolves with that directory on sys.path.
+      "command": "../venv/bin/uvicorn app:app --host 127.0.0.1 --port 8003 --reload",
+      "cwd": "${workspaceFolder}/uploader/api",
+      "env": {
+        "UPLOADER_SAS_ISSUER": "fake",
+        "AZURE_STORAGE_ACCOUNT": "daffstandard",
+        "AZURE_STORAGE_CONTAINER": "uploads",
+        "UPLOADER_DB_PATH": "/tmp/uploads.sqlite3"
+      }
+    },
+    {
+      // Real Azure: reads AZURE_TENANT_ID, AZURE_CLIENT_ID and
+      // AZURE_CLIENT_CERTIFICATE_PATH from uploader/.env (gitignored). This
+      // signs SAS tokens Azure will actually accept and writes to the real
+      // container — the only way to exercise the byte transfer locally.
+      "name": "Uploader API (REAL Azure — writes real blobs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--host", "127.0.0.1", "--port", "8003"],
+      "cwd": "${workspaceFolder}/uploader/api",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "env": { "UPLOADER_DB_PATH": "/tmp/uploads-azure.sqlite3" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // The SPA in Chrome, with source maps so breakpoints work in .vue and
+      // .js sources. Starts the Vite dev server first via the task.
+      //
+      // The dev server is a DIFFERENT ORIGIN from Cloudgene, so there is no
+      // token in localStorage and every API call 401s to the login until
+      // VITE_DEV_TOKEN is set in uploader/client/.env.local — see
+      // uploader/README.md. The /uploads/ path is required: it mirrors
+      // base: '/uploads/' in vite.config.js.
+      "name": "Uploader client (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173/uploads/",
+      "webRoot": "${workspaceFolder}/uploader/client",
+      "preLaunchTask": "uploader: vite dev server",
+      "sourceMaps": true
+    },
+    {
+      "name": "Uploader client (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5173/uploads/",
+      "webRoot": "${workspaceFolder}/uploader/client",
+      "preLaunchTask": "uploader: vite dev server",
+      "sourceMaps": true
+    },
+    {
+      // Vitest with the debugger attached. Pass a file as needed by editing
+      // args, e.g. ["run", "tests/upload.test.js"]. No test touches the
+      // network or Azure.
+      "name": "Uploader client: debug Vitest",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/uploader/client/node_modules/vitest/vitest.mjs",
+      "args": ["run"],
+      "cwd": "${workspaceFolder}/uploader/client",
+      "console": "integratedTerminal",
+      "smartStep": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      // unittest, not pytest. cwd must be uploader/api so the flat module
+      // imports (import app, import naming) resolve.
+      "name": "Uploader API: debug unittest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unittest",
+      "args": ["discover", "-s", "tests", "-t", "."],
+      "cwd": "${workspaceFolder}/uploader/api",
+      "python": "${workspaceFolder}/uploader/venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "compounds": [
+    {
+      // The one to use day to day: needs no network, no Azure credentials
+      // and no real Cloudgene session. Requires VITE_DEV_TOKEN in
+      // uploader/client/.env.local — see uploader/README.md.
+      "name": "Uploader: full stack (offline)",
+      "configurations": [
+        "Uploader API (fake SAS + fake auth, offline)",
+        "Uploader client (Chrome)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "uploader", "order": 1 }
+    },
+    {
+      // Fake SAS, but auth validated against the real Cloudgene — so this
+      // needs network access and a real token in .env.local. Worth running
+      // before shipping, since it exercises the actual contract check.
+      "name": "Uploader: full stack (real Cloudgene auth)",
+      "configurations": [
+        "Uploader API (fake SAS issuer)",
+        "Uploader client (Chrome)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "uploader", "order": 2 }
+    }
+  ]
+}

@@ -45,15 +45,17 @@ import azure_sas
 import naming
 import storage
 from cloudgene_auth import (
+    AUTH_PROVIDER_FAKE,
     AUTH_TOKEN_HEADER,
     CloudgeneContractError,
     CloudgeneUnavailableError,
     NoUserEmailError,
     NotAuthenticatedError,
+    get_auth_provider,
     startup_self_test,
     validate_token,
 )
-from config import ConfigError, load_config, redact
+from config import ISSUER_AZURE, ConfigError, load_config, redact
 from storage import RenewalRefusedError, UploadNotFoundError, UploadStore
 
 logger = logging.getLogger("uploader")
@@ -614,7 +616,22 @@ async def lifespan(app: FastAPI):
     than degrade toward allow-all (§5.3 of the spec).
     """
     config = load_config()
-    logger.info("Starting uploader with config %s", redact(config))
+    auth_provider = get_auth_provider()
+    logger.info(
+        "Starting uploader with auth_provider=%s config %s",
+        auth_provider, redact(config))
+
+    # The one combination that must never run: an auth provider that hands
+    # out identities without asking Cloudgene, wired to an issuer that mints
+    # real, usable write capabilities against the production container. Each
+    # half is safe alone — fake auth is for local development, the Azure
+    # issuer is production — and together they are an open door.
+    if auth_provider == AUTH_PROVIDER_FAKE and config.issuer == ISSUER_AZURE:
+        raise ConfigError(
+            "UPLOADER_AUTH_PROVIDER=fake cannot be combined with "
+            "UPLOADER_SAS_ISSUER=azure: that would issue real Azure write "
+            "capabilities to unauthenticated callers. Use the fake SAS "
+            "issuer for local development.")
 
     startup_self_test()
 

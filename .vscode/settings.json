@@ -1,0 +1,16 @@
+{
+  // The venv is nested at uploader/venv, which VS Code does not reliably
+  // auto-discover from the workspace root.
+  "python.defaultInterpreterPath": "${workspaceFolder}/uploader/venv/bin/python",
+
+  // unittest, not pytest. Discovery runs from uploader/api because the
+  // backend uses flat module imports (import app, import naming).
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestEnabled": true,
+  "python.testing.cwd": "${workspaceFolder}/uploader/api",
+  "python.testing.unittestArgs": ["discover", "-s", "tests", "-t", "."],
+
+  "files.exclude": {
+    "**/__pycache__": true
+  }
+}

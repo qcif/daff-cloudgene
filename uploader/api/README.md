@@ -74,6 +74,7 @@ Optional:
 | Variable | Default | Notes |
 |---|---|---|
 | `UPLOADER_SAS_ISSUER` | `azure` | `fake` for local development |
+| `UPLOADER_AUTH_PROVIDER` | `cloudgene` | `fake` answers auth from `tests/fixtures/` instead of calling Cloudgene, and skips the startup contract check. Local development only; **refused at startup** alongside `UPLOADER_SAS_ISSUER=azure` |
 | `CLOUDGENE_BASE_URL` | `https://cloudgene.qcif.edu.au` | Set to `http://127.0.0.1:8082` in production |
 | `UPLOADER_DB_PATH` | `uploads.sqlite3` | Relative to the working directory |
 | `UPLOADER_MAX_UPLOAD_BYTES` | 500 GiB | Advisory; a SAS cannot enforce size |

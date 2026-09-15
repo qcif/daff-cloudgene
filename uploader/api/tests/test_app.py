@@ -922,6 +922,70 @@ class TestStartup(unittest.TestCase):
 
         return app_module.create_app()
 
+    def azure_env(self, **overrides):
+        """Return an env that satisfies load_config for the Azure issuer.
+
+        The guard under test runs *after* load_config, so the Azure
+        credentials have to be complete — otherwise the test would pass on a
+        missing-variable error and prove nothing about the guard.
+        """
+        cert = Path(self.tmp_dir()) / "cert.pem"
+        cert.write_text("not a real key")
+        cert.chmod(0o600)
+
+        env = {
+            "AZURE_STORAGE_ACCOUNT": ACCOUNT,
+            "AZURE_STORAGE_CONTAINER": CONTAINER,
+            "UPLOADER_SAS_ISSUER": "azure",
+            "AZURE_TENANT_ID": "tenant",
+            "AZURE_CLIENT_ID": "client",
+            "AZURE_CLIENT_CERTIFICATE_PATH": str(cert),
+            "UPLOADER_DB_PATH": str(Path(self.tmp_dir()) / "uploads.sqlite3"),
+        }
+        env.update(overrides)
+        return env
+
+    def tmp_dir(self):
+        """Return a temporary directory that outlives the test."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return tmp.name
+
+    def test_fake_auth_with_the_real_azure_issuer_refuses_to_start(self):
+        # Each half is safe alone; together they would issue real Azure
+        # write capabilities to callers nobody authenticated.
+        application = self.build(
+            self.azure_env(UPLOADER_AUTH_PROVIDER="fake"))
+
+        with self.assertRaises(ConfigError) as ctx:
+            with TestClient(application):
+                pass
+
+        message = str(ctx.exception)
+        self.assertIn("UPLOADER_AUTH_PROVIDER=fake", message)
+        self.assertIn("UPLOADER_SAS_ISSUER=azure", message)
+
+    def test_the_real_azure_issuer_is_fine_with_the_real_auth_provider(self):
+        # The same env minus the fake provider must get past the guard, so
+        # the test above is not passing for an unrelated reason.
+        application = self.build(self.azure_env())
+
+        with mock.patch.object(app_module.azure_sas, "create_issuer"):
+            with TestClient(application):
+                pass
+
+    def test_fake_auth_with_the_fake_issuer_starts(self):
+        application = self.build({
+            "AZURE_STORAGE_ACCOUNT": ACCOUNT,
+            "AZURE_STORAGE_CONTAINER": CONTAINER,
+            "UPLOADER_SAS_ISSUER": "fake",
+            "UPLOADER_AUTH_PROVIDER": "fake",
+            "UPLOADER_DB_PATH": str(Path(self.tmp_dir()) / "uploads.sqlite3"),
+        })
+
+        with TestClient(application) as client:
+            self.assertEqual(client.get("/healthz").status_code, 200)
+
     def test_missing_storage_account_refuses_to_start(self):
         application = self.build({"AZURE_STORAGE_CONTAINER": CONTAINER})
         with self.assertRaises(ConfigError):

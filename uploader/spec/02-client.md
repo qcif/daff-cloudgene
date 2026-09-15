@@ -21,19 +21,20 @@ partitioned by origin, so this page reads Cloudgene's token only because it
 shares `cloudgene.qcif.edu.au`. A separate hostname or port breaks auth
 entirely.
 
-## 2. Blocked on backend work
+## 2. Backend prerequisites — all shipped
 
-Two endpoints the client needs do not exist:
+The two endpoints this plan depends on exist as of Task 4
+([`tasks/completed/4_list_and_renew_endpoints.md`](tasks/completed/4_list_and_renew_endpoints.md)):
 
-- **`GET /uploads/api/files`** — the main screen shows the user their
-  existing files. §9 of the design spec requires it; nothing implements it.
-- **`POST /uploads/{id}/renew`** — in-session resume (§6) needs a fresh SAS
-  for the *same* blob path. `POST /uploads` mints a new path every time,
-  which would abandon staged blocks and restart from zero.
+- **`GET /uploads/api/files`** — the existing-files list §9 of the design
+  spec requires. Reads Azure, not the record table.
+- **`POST /uploads/{id}/renew`** — a fresh SAS for the *same* blob path,
+  which in-session resume (§6) needs. `POST /uploads` mints a new path every
+  time, so it cannot serve a resume without abandoning staged blocks.
 
-Both are specified in
-[`tasks/4_list_and_renew_endpoints.md`](tasks/4_list_and_renew_endpoints.md),
-along with the `az_path` field §8 depends on. Build them first.
+The `az_path` field §8 depends on shipped with them. Nothing here is
+blocked; the build brief is
+[`tasks/5_build_client.md`](tasks/5_build_client.md).
 
 ## 3. The trap that will silently fail every upload
 
@@ -46,9 +47,8 @@ header means every CSV upload transfers perfectly and is then marked failed.
 The client **must** pass the same value it declared:
 
 ```js
-await blockBlobClient.uploadData(file, {
+await blockBlobClient.commitBlockList(blockIds, {
   blobHTTPHeaders: { blobContentType: declaredContentType },
-  // ...
 });
 ```
 
@@ -218,8 +218,9 @@ at `uploader/client/dist/` inside the deployed checkout. So either:
   production dependency, and the operator gains a build step in a deployment
   that is currently just a pull.
 
-Going with the first unless told otherwise. `node_modules/` is ignored in
-both cases.
+Settled on the first; [`tasks/5_build_client.md`](tasks/5_build_client.md)
+§11 carries it, including the `.gitignore` change. `node_modules/` is
+ignored either way.
 
 ## 11. Tests
 
