@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "name": "delete-old-user-uploads",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["uploads/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "delete": {
+              "daysAfterModificationGreaterThan": 7
+            }
+          }
+        }
+      }
+    }
+  ]
+}
