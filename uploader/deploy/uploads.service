@@ -14,6 +14,24 @@ Description=Azure uploader API (FastAPI)
 After=network-online.target cloudgene.service
 Wants=network-online.target cloudgene.service
 
+# A misconfigured service (failed lifespan contract check, the
+# fake-auth/azure-issuer interlock, an unreadable certificate) can never
+# succeed by retrying, so Restart=on-failure with no cap would spin forever
+# and bury the one real error under thousands of identical journal entries.
+# 15 attempts at 2s apart is ~30s of restarts before systemd gives up and
+# leaves the unit in `failed`, where `systemctl status` shows the reason
+# once instead of on a loop. 30s is also enough slack for the boot-race
+# case in the After=/Wants= lines above: Cloudgene's JVM start is the only
+# realistic source of a slow-but-eventually-successful retry here, and it
+# has not been observed to take anywhere near that long on this host.
+#
+# These two are [Unit] keys, not [Service] keys, despite configuring
+# Restart= which lives in [Service]. They were in [Service] until first
+# deploy, where systemd logged "Unknown key name 'StartLimitIntervalSec' in
+# section 'Service', ignoring" and silently ran with no restart cap at all.
+StartLimitIntervalSec=30
+StartLimitBurst=15
+
 [Service]
 User=www-data
 Group=www-data
@@ -32,8 +50,17 @@ Environment=UPLOADER_SAS_ISSUER=azure
 Environment=AZURE_STORAGE_ACCOUNT=daffstandard
 Environment=AZURE_STORAGE_CONTAINER=uploads
 
-# Pending-upload records. SQLite, WAL mode, inside ReadWritePaths below.
-Environment=UPLOADER_DB_PATH=@REPO_ROOT@/uploader/api/uploads.sqlite3
+# Pending-upload records. SQLite in WAL mode, which means the process needs
+# write access to the *directory*, not just the database file: every write
+# creates uploads.sqlite3-wal and uploads.sqlite3-shm alongside it, and
+# checkpointing unlinks and recreates them. Granting that inside the
+# checkout would mean www-data can create files in the deployed source
+# tree, so the database lives outside the repo instead.
+#
+# StateDirectory= below creates /var/lib/uploads owned www-data:www-data,
+# which is what makes this path writable — there is no ReadWritePaths= for
+# it and none is needed.
+Environment=UPLOADER_DB_PATH=/var/lib/uploads/uploads.sqlite3
 
 # AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_CERTIFICATE_PATH live
 # here, NOT in this file: a unit file is world-readable. Create it outside
@@ -72,18 +99,8 @@ ExecStart=@REPO_ROOT@/uploader/venv/bin/uvicorn app:app --host=${HOST} --port=${
 Restart=on-failure
 RestartSec=2
 
-# A misconfigured service (failed lifespan contract check, the
-# fake-auth/azure-issuer interlock, an unreadable certificate) can never
-# succeed by retrying, so Restart=on-failure with no cap would spin forever
-# and bury the one real error under thousands of identical journal entries.
-# 15 attempts at 2s apart is ~30s of restarts before systemd gives up and
-# leaves the unit in `failed`, where `systemctl status` shows the reason
-# once instead of on a loop. 30s is also enough slack for the boot-race
-# case in the After=/Wants= lines above: Cloudgene's JVM start is the only
-# realistic source of a slow-but-eventually-successful retry here, and it
-# has not been observed to take anywhere near that long on this host.
-StartLimitIntervalSec=30
-StartLimitBurst=15
+# The restart budget that goes with Restart= above is StartLimitIntervalSec=
+# / StartLimitBurst=, which are [Unit] keys — see the top of this file.
 
 # The journal names these logs `uploads` instead of `uvicorn`, so
 # `journalctl -t uploads` and `journalctl -u uploads` agree and a shared
@@ -101,7 +118,12 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=@REPO_ROOT@/uploader
+
+# Creates and owns /var/lib/uploads as www-data:www-data (0755) on start,
+# and makes it writable through ProtectSystem=strict. This is the service's
+# only writable location: the checkout itself stays read-only to www-data,
+# so a compromised uploader cannot modify the code it is running.
+StateDirectory=uploads
 AmbientCapabilities=
 CapabilityBoundingSet=
 LockPersonality=yes
