@@ -64,9 +64,9 @@ function confirmDelete(file) {
         <tr>
           <td style="max-width: 28rem">
             <div class="d-flex align-items-center">
-              <span class="text-truncate text-monospace" :title="f.az_path">
+              <small class="text-truncate text-monospace" :title="f.az_path">
                 {{ f.az_path || '—' }}
-              </span>
+              </small>
               <button
                 v-if="f.az_path"
                 type="button"

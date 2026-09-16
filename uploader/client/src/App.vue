@@ -215,7 +215,7 @@ onBeforeUnmount(() => {
 
   <div class="container mt-5 pt-5">
     <div class="row justify-content-center">
-      <div class="col-lg-8">
+      <div class="col">
         <div class="card shadow mb-4">
           <div class="card-body">
             <h4 class="card-title mb-4">Upload files</h4>
