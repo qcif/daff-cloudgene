@@ -36,6 +36,11 @@ The `az_path` field §8 depends on shipped with them. Nothing here is
 blocked; the build brief is
 [`tasks/5_build_client.md`](tasks/5_build_client.md).
 
+One later addition is **not** shipped: `DELETE /uploads/api/files`, and the
+`client_path` field on the list response that §8.1 sends back to it. Both
+are specified in [`tasks/08-delete-files.md`](tasks/08-delete-files.md) and
+must land before the delete button does.
+
 ## 3. The trap that will silently fail every upload
 
 `app.reconcile_upload()` compares the blob's real content type against the
@@ -181,6 +186,34 @@ Render the `az_path` field the API returns. Do **not** build it client-side
 from a hardcoded container name — that is one deployment away from emitting
 paths that point at the wrong container.
 
+The same applies to the existing-files table, which is the *other* place a
+user copies a path from: it shows the full `az://` path, monospaced, with a
+per-row copy button and a `title` attribute so a truncated cell is still
+readable. The blob path alone is not a useful value to show — nobody pastes
+it anywhere. That table currently renders `blob_path`;
+[`tasks/09-az-path-in-file-list.md`](tasks/09-az-path-in-file-list.md) is
+the change.
+
+## 8.1 Deleting a file
+
+Each row of "Your files in storage" carries a delete button, behind a
+`confirm()` naming the full `az://` path and stating that it cannot be
+undone. The request is `DELETE /uploads/api/files` with the row's
+`client_path` — the leaf within the user's own prefix, taken from the list
+response, never derived by slicing the blob path. The server rebuilds the
+full path from the resolved identity; see
+[`tasks/08-delete-files.md`](tasks/08-delete-files.md) §2.
+
+It is idempotent, so `deleted: false` ("it was already gone") and
+`deleted: true` take the same UI path: drop the row, then reload the list so
+the table reflects Azure rather than a guess. A `409` means an upload to
+that path is still in progress — show the message verbatim against that row
+and leave the row alone. Errors are per row: one failed delete must not
+clear the table or the upload results.
+
+`ExistingFiles.vue` emits rather than calling the API, so `App.vue` stays
+the only module that talks to `api.js`.
+
 ## 9. Local development
 
 The dev server is a different origin from Cloudgene, so **there is no token
@@ -239,5 +272,8 @@ fires before expiry rather than after; and a terminal record surfaces as
 ## 12. Out of scope
 
 Resume across browser sessions — a reload starts over, for the reason in
-§6.1. Per-block progress, deletion or renaming of existing blobs, folder
-uploads, and deployment itself.
+§6.1. Per-block progress, renaming of existing blobs, bulk or multi-select
+delete, and folder uploads.
+
+Single-file deletion **was** out of scope and is now in — see §8.1 and
+[`tasks/08-delete-files.md`](tasks/08-delete-files.md).

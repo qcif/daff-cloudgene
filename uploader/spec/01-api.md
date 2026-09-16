@@ -30,6 +30,31 @@ A `pending` record left behind by a client that never calls back is closed
 out by `store.expire_pending()`, run opportunistically on every `POST
 /uploads` (no scheduler on the host).
 
+Alongside that flow: `GET /files` lists the caller's own prefix, read from
+Azure rather than the record table, and `DELETE /files` removes one blob
+from it. Both are owner-scoped by construction — the prefix comes from the
+resolved identity and never from the request. See
+[`tasks/08-delete-files.md`](tasks/08-delete-files.md) for the delete
+route's design.
+
+## Deletion
+
+The client cannot delete: every SAS is `sp=c`, create-only, and widening it
+to `d` would mean a leaked SAS could destroy data. So `DELETE /files` runs
+the deletion server-side under the service principal — no new Azure role,
+since container-scoped `Storage Blob Data Contributor` already covers it.
+
+The request names a `client_path` (the leaf within the caller's own prefix),
+never a blob path; the server rebuilds the full path with
+`naming.build_blob_path(email, client_path)`, so deleting someone else's
+blob is not rejected so much as unexpressible. The call is idempotent —
+`200` with `deleted: false` when the blob was already gone — and refuses
+with `409` while a live `pending` record exists for the path, because
+deletion does not revoke the outstanding SAS and an in-flight upload would
+otherwise re-create the blob afterwards. Records are never mutated by a
+delete; the container is the truth about what exists, and the record table
+remains the issuance history.
+
 ## Modules
 
 | File | Owns |
@@ -38,7 +63,7 @@ out by `store.expire_pending()`, run opportunistically on every `POST
 | `cloudgene_auth.py` | Forwards the token to Cloudgene; interprets `loggedIn`/`apps`/`user.mail` |
 | `naming.py` | `<email>/<client path>` blob paths; traversal defence (3 layers) |
 | `storage.py` | SQLite (WAL) table of upload records; rate-limit queries, expiry sweep |
-| `azure_sas.py` | `SasIssuer`/`BlobReader`/`BlobLister` protocols; real (cert-based), fake and local-filesystem issuers |
+| `azure_sas.py` | `SasIssuer`/`BlobReader`/`BlobLister`/`BlobDeleter` protocols; real (cert-based), fake and local-filesystem issuers |
 | `config.py` | Env loading; raises at startup on anything missing (fail-fast, not fail-open) |
 
 ## The trust boundary that matters
@@ -85,13 +110,18 @@ the `az://` listing, the create-only `409` — works fully offline. See
 
 ## Not yet built
 
-- Deleting abandoned *committed* blobs (uncommitted blocks are
+- `DELETE /files` and the `BlobDeleter` protocol — specified in
+  [`tasks/08-delete-files.md`](tasks/08-delete-files.md), not yet
+  implemented.
+- Automatic cleanup of abandoned *committed* blobs (uncommitted blocks are
   garbage-collected by Azure automatically after 7 days and need no code) —
-  see `tasks/2_azure_resources.md` §2.1.
-- The Vue frontend.
-- Deployment itself: `../deploy/uploads.service` and
-  `../deploy/nginx-uploads.conf` are written, not installed. See
-  `../deploy/README.md`.
+  see `tasks/completed/2_azure_resources.md` §2.1. User-initiated deletion
+  above is a different thing and does not close this out, though it gives
+  the sweep the `delete_blob` adapter it would need.
+
+The Vue frontend and the deployment package are built and installed; the
+service is live on `cloudgene.qcif.edu.au` and uploads land in the real
+container.
 
 ## Constraints that shape everything above
 
