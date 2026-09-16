@@ -214,9 +214,11 @@ onBeforeUnmount(() => {
   </nav>
 
   <div class="container mt-5 pt-5">
+    <h1>Upload to Azure</h1>
+
     <div class="my-5" style="padding: 12px; border: 1px solid #ddd; border-left: 5px solid dodgerblue;">
       <p>
-        Use this tool to upload large (1GB+) files to be used as input data for your workflow runs. This will upload the files directly to Azure Blob, and return an <code>az://</code> URL for your files that can be pasted directly into your <code>samplesheet.csv</code> to be submitted to the workflow.
+        Use this tool to upload large (1GB+) files to be used as input data for your workflow runs. This will upload the files directly to Azure Blob storage, and return an <code>az://</code> URL for your files that can be pasted directly into your <code>samplesheet.csv</code> to be submitted to the workflow.
       </p>
 
       <p>
