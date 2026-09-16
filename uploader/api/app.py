@@ -8,11 +8,12 @@ landed in the container against what was promised.
 
 Shape
 -----
-Four routes. Three of them resolve identity through
-:func:`cloudgene_auth.validate_token` via the :func:`require_user`
-dependency, so a new route cannot quietly ship unauthenticated. ``/healthz``
-is the exception, deliberately: it answers for *this process*, and must not
-report unhealthy because Cloudgene is restarting.
+Issuance, completion, renewal, status, listing and deletion. Every one of
+them resolves identity through :func:`cloudgene_auth.validate_token` via the
+:func:`require_user` dependency, so a new route cannot quietly ship
+unauthenticated. ``/healthz`` is the exception, deliberately: it answers for
+*this process*, and must not report unhealthy because Cloudgene is
+restarting.
 
 ``root_path="/uploads/api"`` matches the trailing slash on nginx's
 ``proxy_pass`` (§6 of the spec), which strips the prefix before FastAPI sees
@@ -24,6 +25,9 @@ Trust boundaries
   that posts an ``email`` field is ignored (§12 of the spec).
 - ``GET /uploads/{id}`` is scoped to the resolved email, not just the ID. An
   upload ID that leaks must not become an authorisation bypass.
+- ``DELETE /files`` takes a path *within* the caller's prefix and rebuilds
+  the blob path from the resolved identity, so naming another user's blob
+  is unexpressible rather than merely refused.
 - The completion callback is a **trigger**, never evidence. The verdict
   comes from blob properties read server-side (§4.5 of the task brief).
 - Nothing that could be a credential — the token, the client secret, a SAS
@@ -93,6 +97,15 @@ class ValidationFailedError(Exception):
     """
 
 
+class UploadInProgressError(Exception):
+    """A delete was asked for a blob an unexpired SAS still points at.
+
+    Maps to HTTP 409. Deleting does not revoke the outstanding capability,
+    so an upload mid-transfer would commit its blocks after the delete and
+    re-create the blob — leaving the user staring at a file they deleted.
+    """
+
+
 class RateLimitExceededError(Exception):
     """This user has been issued too many SAS tokens too recently.
 
@@ -118,6 +131,24 @@ class UploadRequest(BaseModel):
     filename: str = Field(..., max_length=MAX_FILENAME_LENGTH)
     size: int = Field(..., ge=1)
     content_type: str = Field(..., max_length=MAX_CONTENT_TYPE_LENGTH)
+
+
+class DeleteRequest(BaseModel):
+    """The client's nomination of one file to delete, within its own prefix.
+
+    ``client_path`` is the portion *after* the user's prefix, never a blob
+    path: the server rebuilds the full path from the resolved identity with
+    the same :func:`naming.build_blob_path` that ``POST /uploads`` uses. A
+    caller therefore cannot name another user's blob — not "is refused",
+    but has no way to express it.
+
+    A JSON body rather than a path parameter because blob paths contain
+    ``/`` and an email address, so a path parameter would mean
+    double-encoding through nginx and a ``{path:path}`` route — a shape that
+    invites a traversal bug for no benefit.
+    """
+
+    client_path: str = Field(..., max_length=MAX_FILENAME_LENGTH)
 
 
 def get_config(request: Request):
@@ -383,6 +414,10 @@ def register_exception_handlers(app: FastAPI) -> None:
         logger.error("Cloudgene returned an unusable email: %s", exc)
         return _error(503, GENERIC_UNAVAILABLE)
 
+    @app.exception_handler(UploadInProgressError)
+    async def _upload_in_progress(request: Request, exc):
+        return _error(409, str(exc))
+
     @app.exception_handler(RateLimitExceededError)
     async def _rate_limited(request: Request, exc):
         return _error(
@@ -590,6 +625,11 @@ def register_routes(app: FastAPI) -> None:
         for blob in blobs:
             entry = {
                 "blob_path": blob.blob_path,
+                # What DELETE /files takes back. Sent from here rather than
+                # left for the client to derive by slicing off a prefix it
+                # would have to reconstruct: the two values must come from
+                # the same source, and this is that source.
+                "client_path": blob.blob_path[len(prefix):],
                 "az_path": config.az_path(blob.blob_path),
                 "size": blob.size,
                 "content_type": blob.content_type,
@@ -604,6 +644,61 @@ def register_routes(app: FastAPI) -> None:
             files.append(entry)
 
         return {"files": files, "truncated": truncated}
+
+    @app.delete("/files")
+    def delete_file(
+        body: DeleteRequest,
+        email: str = Depends(require_user),
+        config=Depends(get_config),
+        store: UploadStore = Depends(get_store),
+        issuer=Depends(get_issuer),
+    ):
+        """Delete one blob from the caller's own prefix.
+
+        Server-side, under the service principal: every SAS issued here is
+        create-only, and widening it so the browser could delete would cost
+        the strongest property this design has.
+
+        Idempotent. A blob that is already gone is ``200`` with
+        ``deleted: false``, not ``404`` — a double-click, a retry after a
+        flaky response and two tabs racing all converge on one outcome, and
+        the UI does the same thing either way.
+
+        The record table is not touched. Records are the issuance history —
+        what was promised and how it resolved — while the container is the
+        truth about what exists, so a deleted blob simply stops appearing in
+        ``GET /files``.
+        """
+        blob_path = naming.build_blob_path(email, body.client_path)
+        prefix = naming.prefix_for(email)
+
+        # build_blob_path already guarantees this. The assertion is here so
+        # that a future refactor of naming.py fails a test rather than
+        # leaking a delete outside the caller's prefix.
+        if not blob_path.startswith(prefix):
+            logger.error(
+                "refusing to delete a path outside the caller's prefix "
+                "user=%s blob=%s", email, blob_path)
+            raise naming.InvalidPathError(
+                "Path escaped the user's prefix")
+
+        in_progress = store.find_live_pending(email, blob_path)
+        if in_progress is not None:
+            raise UploadInProgressError(
+                "An upload to this path is in progress; cancel it or wait "
+                "for it to finish, then delete.")
+
+        existed = issuer.delete_blob(blob_path)
+
+        logger.info(
+            "deleted blob user=%s blob=%s existed=%s",
+            email, blob_path, str(existed).lower())
+
+        return {
+            "deleted": existed,
+            "blob_path": blob_path,
+            "az_path": config.az_path(blob_path),
+        }
 
 
 @asynccontextmanager

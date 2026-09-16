@@ -26,6 +26,7 @@ from pathlib import Path
 from unittest import mock
 
 import app as app_module
+import azure_sas
 import config as config_module
 import storage
 from cloudgene_auth import (
@@ -771,6 +772,344 @@ class TestListFiles(AppTestCase):
     def test_requires_authentication(self):
         self.use_cloudgene_response(ANONYMOUS)
         self.assertEqual(self.list_files().status_code, 401)
+
+    def test_response_includes_the_client_path_to_send_back(self):
+        # The value DELETE /files takes. It comes from here so the client
+        # never has to derive it by slicing the blob path.
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+
+        entry = self.list_files().json()["files"][0]
+        self.assertEqual(entry["client_path"], VALID_BODY["filename"])
+        self.assertEqual(
+            f"{EMAIL}/{entry['client_path']}", entry["blob_path"])
+
+
+class TestDeleteFile(AppTestCase):
+    """§2 of ``tasks/08-delete-files.md``."""
+
+    def delete(self, client_path, token="a.token.value"):
+        # httpx's ``delete()`` takes no body, so the request is built
+        # explicitly; a JSON body on DELETE is what the route specifies.
+        return self.client.request(
+            "DELETE",
+            "/files",
+            json={"client_path": client_path},
+            headers={"X-Auth-Token": token},
+        )
+
+    def put_own_blob(self, client_path, size=1):
+        """Pretend the caller already uploaded to their own prefix."""
+        blob_path = f"{EMAIL}/{client_path}"
+        self.issuer.put_blob(
+            blob_path, size=size, content_type="text/plain")
+        return blob_path
+
+    def test_delete_removes_the_blob(self):
+        blob_path = self.put_own_blob("reads.fastq.gz")
+
+        response = self.delete("reads.fastq.gz")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["deleted"])
+        self.assertEqual(response.json()["blob_path"], blob_path)
+        self.assertIsNone(self.issuer.get_blob_properties(blob_path))
+
+    def test_a_second_delete_is_200_with_deleted_false(self):
+        self.put_own_blob("reads.fastq.gz")
+        self.delete("reads.fastq.gz")
+
+        response = self.delete("reads.fastq.gz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["deleted"])
+
+    def test_deleting_a_blob_that_never_existed_is_200(self):
+        response = self.delete("never-uploaded.txt")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["deleted"])
+
+    def test_response_includes_az_path(self):
+        blob_path = self.put_own_blob("reads.fastq.gz")
+        response = self.delete("reads.fastq.gz")
+        self.assertEqual(
+            response.json()["az_path"], f"az://{CONTAINER}/{blob_path}")
+
+    def test_the_deleted_blob_stops_appearing_in_the_listing(self):
+        self.put_own_blob("reads.fastq.gz")
+        self.delete("reads.fastq.gz")
+
+        response = self.client.get(
+            "/files", headers={"X-Auth-Token": "a.token.value"})
+        self.assertEqual(response.json()["files"], [])
+
+    def test_only_the_named_blob_is_deleted(self):
+        self.put_own_blob("keep.txt")
+        self.put_own_blob("drop.txt")
+
+        self.delete("drop.txt")
+
+        self.assertIsNotNone(
+            self.issuer.get_blob_properties(f"{EMAIL}/keep.txt"))
+
+    def test_the_record_table_is_left_alone(self):
+        # Records are the issuance history; the container is the truth
+        # about what exists. A delete adds no state and mutates none.
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+        self.complete(body["upload_id"])
+
+        self.delete(VALID_BODY["filename"])
+
+        record = self.store.get(body["upload_id"], EMAIL)
+        self.assertEqual(record.state, storage.STATE_COMPLETED)
+
+    def test_a_delete_is_logged_with_the_user_and_the_outcome(self):
+        self.put_own_blob("reads.fastq.gz")
+
+        with self.assertLogs("uploader", level="INFO") as logs:
+            self.delete("reads.fastq.gz")
+
+        joined = "\n".join(logs.output)
+        self.assertIn(f"deleted blob user={EMAIL}", joined)
+        self.assertIn("existed=true", joined)
+
+    def complete(self, upload_id):
+        return self.client.post(
+            f"/uploads/{upload_id}/complete",
+            headers={"X-Auth-Token": "a.token.value"})
+
+
+class TestDeleteFileValidation(AppTestCase):
+    """Every rejected path must be refused before storage is touched."""
+
+    def delete(self, client_path):
+        return self.client.request(
+            "DELETE",
+            "/files",
+            json={"client_path": client_path},
+            headers={"X-Auth-Token": "a.token.value"},
+        )
+
+    def test_rejected_paths_are_400_and_reach_the_issuer_not_at_all(self):
+        cases = (
+            "../secret.csv",
+            "..\\secret.csv",
+            "/etc/passwd",
+            "C:/Windows/system32",
+            "a:b.txt",
+            "with\x00nul.txt",
+            "",
+            "run7/",
+            "%2e%2e/secret.csv",
+        )
+        for client_path in cases:
+            with self.subTest(client_path=client_path):
+                response = self.delete(client_path)
+                self.assertEqual(response.status_code, 400, response.text)
+
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_a_missing_client_path_is_400(self):
+        response = self.client.request(
+            "DELETE", "/files", json={},
+            headers={"X-Auth-Token": "a.token.value"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_another_users_blob_is_unexpressible(self):
+        # Not "rejected because it belongs to bob" — there is no value the
+        # caller can send that names bob's blob at all.
+        self.issuer.put_blob(
+            "bob@example.com/secret.csv", size=1, content_type="text/csv")
+
+        response = self.delete("../bob@example.com/secret.csv")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNotNone(
+            self.issuer.get_blob_properties("bob@example.com/secret.csv"))
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_bob_and_bob_dot_au_do_not_collide(self):
+        # The trailing slash on the prefix again: bob@example.com must not
+        # be able to delete out of bob@example.com.au's prefix.
+        self.issuer.put_blob(
+            "bob@example.com.au/other.txt", size=1, content_type="text/plain")
+
+        self.use_cloudgene_response(dict(
+            AUTHORISED,
+            user=dict(AUTHORISED["user"], mail="bob@example.com")))
+
+        response = self.client.request(
+            "DELETE", "/files",
+            json={"client_path": "../bob@example.com.au/other.txt"},
+            headers={"X-Auth-Token": "a.token.value"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNotNone(
+            self.issuer.get_blob_properties("bob@example.com.au/other.txt"))
+
+    def test_a_client_supplied_blob_path_has_no_effect(self):
+        self.issuer.put_blob(
+            f"{OTHER_EMAIL}/theirs.txt", size=1, content_type="text/plain")
+        self.issuer.put_blob(
+            f"{EMAIL}/mine.txt", size=1, content_type="text/plain")
+
+        response = self.client.request(
+            "DELETE", "/files",
+            json={
+                "client_path": "mine.txt",
+                "blob_path": f"{OTHER_EMAIL}/theirs.txt",
+                "email": OTHER_EMAIL,
+            },
+            headers={"X-Auth-Token": "a.token.value"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["blob_path"], f"{EMAIL}/mine.txt")
+        self.assertIsNotNone(
+            self.issuer.get_blob_properties(f"{OTHER_EMAIL}/theirs.txt"))
+
+    def test_unauthenticated_is_401_before_any_issuer_call(self):
+        self.use_cloudgene_response(ANONYMOUS)
+        response = self.delete("reads.fastq.gz")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_unentitled_is_403_before_any_issuer_call(self):
+        self.use_cloudgene_response(UNENTITLED)
+        response = self.delete("reads.fastq.gz")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_cloudgene_unreachable_is_503_before_any_issuer_call(self):
+        self.use_cloudgene_error(CloudgeneUnavailableError("refused"))
+        response = self.delete("reads.fastq.gz")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_an_azure_failure_is_503(self):
+        with mock.patch.object(
+            self.issuer, "delete_blob",
+            side_effect=azure_sas.SasError("storage is down"),
+        ):
+            response = self.delete("reads.fastq.gz")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("storage is down", response.text)
+
+
+class TestDeleteFileWithAPendingUpload(AppTestCase):
+    """A live SAS outlives the delete, so the delete waits for it."""
+
+    def delete(self, client_path):
+        return self.client.request(
+            "DELETE",
+            "/files",
+            json={"client_path": client_path},
+            headers={"X-Auth-Token": "a.token.value"},
+        )
+
+    def test_a_live_pending_record_refuses_the_delete(self):
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+
+        response = self.delete(VALID_BODY["filename"])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("in progress", response.json()["detail"])
+
+    def test_the_blob_survives_the_refusal(self):
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+
+        self.delete(VALID_BODY["filename"])
+
+        self.assertIsNotNone(
+            self.issuer.get_blob_properties(body["blob_path"]))
+        self.assertEqual(self.issuer.delete_calls, [])
+
+    def test_an_expired_record_imposes_no_restriction(self):
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+        with self.store.session() as connection:
+            connection.execute(
+                "UPDATE uploads SET state = ?, expires_at = ? "
+                "WHERE upload_id = ?",
+                (
+                    storage.STATE_EXPIRED,
+                    storage.format_timestamp(
+                        storage.utcnow() - timedelta(hours=1)),
+                    body["upload_id"],
+                ),
+            )
+
+        response = self.delete(VALID_BODY["filename"])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["deleted"])
+
+    def test_a_lapsed_pending_record_imposes_no_restriction(self):
+        # Still 'pending' only because no sweep has run since it lapsed.
+        # The SAS it names is expired, so it cannot re-create the blob.
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+        with self.store.session() as connection:
+            connection.execute(
+                "UPDATE uploads SET expires_at = ? WHERE upload_id = ?",
+                (
+                    storage.format_timestamp(
+                        storage.utcnow() - timedelta(hours=1)),
+                    body["upload_id"],
+                ),
+            )
+
+        response = self.delete(VALID_BODY["filename"])
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_completed_record_imposes_no_restriction(self):
+        body = self.issue()
+        self.issuer.put_blob(
+            body["blob_path"], size=VALID_BODY["size"],
+            content_type=VALID_BODY["content_type"])
+        self.client.post(
+            f"/uploads/{body['upload_id']}/complete",
+            headers={"X-Auth-Token": "a.token.value"})
+
+        response = self.delete(VALID_BODY["filename"])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["deleted"])
+
+    def test_another_users_pending_record_does_not_block_a_delete(self):
+        # The refusal is owner-scoped like everything else: bob's pending
+        # upload is about bob's prefix, not this caller's.
+        self.issuer.put_blob(
+            f"{EMAIL}/reads.fastq.gz", size=1, content_type="text/plain")
+        self.store.create(
+            user_email=OTHER_EMAIL,
+            blob_path=f"{EMAIL}/reads.fastq.gz",
+            declared_size=1,
+            declared_content_type="text/plain",
+            expires_at=storage.utcnow() + timedelta(hours=1),
+        )
+
+        response = self.delete("reads.fastq.gz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["deleted"])
 
 
 class TestRenewal(AppTestCase):

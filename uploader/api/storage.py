@@ -304,6 +304,38 @@ class UploadStore:
 
         return [_row_to_upload(row) for row in rows]
 
+    def find_live_pending(
+        self,
+        user_email: str,
+        blob_path: str,
+        now: datetime = None,
+    ) -> Upload:
+        """Return an unexpired ``pending`` record for one blob, or ``None``.
+
+        What ``DELETE /files`` refuses on: deleting a blob does not revoke
+        the SAS already issued for it, so an upload still in flight would
+        commit its block list afterwards and re-create the blob.
+
+        Expiry is checked here rather than relying on
+        :meth:`expire_pending` having run, so a lapsed record does not block
+        a delete just because no issuance has happened since it lapsed.
+        """
+        cutoff = format_timestamp(now or utcnow())
+
+        with self.session() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM uploads
+                WHERE user_email = ? AND blob_path = ? AND state = ?
+                    AND expires_at > ?
+                ORDER BY expires_at DESC
+                LIMIT 1
+                """,
+                (user_email, blob_path, STATE_PENDING, cutoff),
+            ).fetchone()
+
+        return None if row is None else _row_to_upload(row)
+
     def count_issued_since(self, user_email: str, since: datetime) -> int:
         """Return how many tokens this user was issued since ``since``."""
         with self.session() as connection:

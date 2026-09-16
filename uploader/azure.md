@@ -52,6 +52,21 @@ az role assignment create \
   --scope "/subscriptions/$SUB/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT_STD/blobServices/default/containers/$CONTAINER_NAME"
 ```
 
+`Storage Blob Data Contributor` is exercised for **delete** as well as read
+and list: `DELETE /uploads/api/files` removes a blob server-side under this
+principal, because the SAS handed to the browser is create-only and must
+stay that way. Narrowing this assignment to a reader role would break that
+route. Nothing extra needs granting — `.../blobs/delete` is already in it.
+
+Deletion through that route is permanent unless blob soft delete is enabled
+on the account, which nothing here does. To check:
+
+```sh
+az storage account blob-service-properties show \
+  --account-name "$STORAGE_ACCOUNT_STD" \
+  --query deleteRetentionPolicy
+```
+
 Verify that it worked
 
 ```sh

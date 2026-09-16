@@ -36,10 +36,10 @@ The `az_path` field §8 depends on shipped with them. Nothing here is
 blocked; the build brief is
 [`tasks/5_build_client.md`](tasks/5_build_client.md).
 
-One later addition is **not** shipped: `DELETE /uploads/api/files`, and the
-`client_path` field on the list response that §8.1 sends back to it. Both
-are specified in [`tasks/08-delete-files.md`](tasks/08-delete-files.md) and
-must land before the delete button does.
+`DELETE /uploads/api/files` and the `client_path` field on the list response
+that §8.1 sends back to it shipped later, per
+[`tasks/completed/08-delete-files.md`](tasks/completed/08-delete-files.md);
+the delete button is built on top of them.
 
 ## 3. The trap that will silently fail every upload
 
@@ -202,7 +202,7 @@ undone. The request is `DELETE /uploads/api/files` with the row's
 `client_path` — the leaf within the user's own prefix, taken from the list
 response, never derived by slicing the blob path. The server rebuilds the
 full path from the resolved identity; see
-[`tasks/08-delete-files.md`](tasks/08-delete-files.md) §2.
+[`tasks/completed/08-delete-files.md`](tasks/completed/08-delete-files.md) §2.
 
 It is idempotent, so `deleted: false` ("it was already gone") and
 `deleted: true` take the same UI path: drop the row, then reload the list so
@@ -276,4 +276,4 @@ Resume across browser sessions — a reload starts over, for the reason in
 delete, and folder uploads.
 
 Single-file deletion **was** out of scope and is now in — see §8.1 and
-[`tasks/08-delete-files.md`](tasks/08-delete-files.md).
+[`tasks/completed/08-delete-files.md`](tasks/completed/08-delete-files.md).

@@ -209,6 +209,28 @@ class TestFakeSasIssuer(unittest.TestCase):
         listed = self.issuer.list_blobs("chyde@neoformit.com/")
         self.assertIsNotNone(listed[0].last_modified)
 
+    def test_delete_blob_removes_it_from_the_table(self):
+        self.issuer.put_blob(BLOB_PATH, size=1, content_type="text/plain")
+
+        self.assertTrue(self.issuer.delete_blob(BLOB_PATH))
+        self.assertIsNone(self.issuer.get_blob_properties(BLOB_PATH))
+        self.assertEqual(self.issuer.list_blobs("chyde@neoformit.com/"), [])
+
+    def test_deleting_an_absent_blob_is_false_not_an_error(self):
+        self.assertFalse(self.issuer.delete_blob(BLOB_PATH))
+
+    def test_delete_leaves_every_other_blob_alone(self):
+        self.issuer.put_blob("alice@example.com/a.txt", size=1)
+        self.issuer.put_blob("alice@example.com/b.txt", size=2)
+
+        self.issuer.delete_blob("alice@example.com/a.txt")
+
+        paths = [
+            blob.blob_path
+            for blob in self.issuer.list_blobs("alice@example.com/")
+        ]
+        self.assertEqual(paths, ["alice@example.com/b.txt"])
+
 
 class TestLocalFileSasIssuer(unittest.TestCase):
     """§8 of ``06-mock-azure.md``.
@@ -316,6 +338,54 @@ class TestLocalFileSasIssuer(unittest.TestCase):
 
         self.assertIsNone(
             self.issuer.get_blob_properties("../escaped-devblob-test-file"))
+
+    def test_delete_removes_the_file_and_its_sidecar(self):
+        self._write_committed_blob(
+            BLOB_PATH, b"data", content_type="text/plain")
+        target = self.root / BLOB_PATH
+        meta = target.with_name(target.name + LOCAL_META_SUFFIX)
+
+        self.assertTrue(self.issuer.delete_blob(BLOB_PATH))
+        self.assertFalse(target.exists())
+        self.assertFalse(meta.exists())
+        self.assertEqual(self.issuer.list_blobs(""), [])
+
+    def test_deleting_an_absent_blob_is_false_not_an_error(self):
+        self.assertFalse(self.issuer.delete_blob(BLOB_PATH))
+
+    def test_delete_prunes_the_directories_it_emptied(self):
+        self._write_committed_blob(BLOB_PATH, b"data")
+
+        self.issuer.delete_blob(BLOB_PATH)
+
+        self.assertFalse((self.root / "chyde@neoformit.com").exists())
+        self.assertTrue(self.root.is_dir())
+
+    def test_delete_keeps_a_directory_that_still_holds_a_file(self):
+        self._write_committed_blob("alice@example.com/keep.txt", b"k")
+        self._write_committed_blob("alice@example.com/drop.txt", b"d")
+
+        self.issuer.delete_blob("alice@example.com/drop.txt")
+
+        self.assertTrue((self.root / "alice@example.com/keep.txt").is_file())
+
+    def test_delete_cannot_escape_the_root(self):
+        outside = self.root.parent / "escaped-delete-test-file"
+        self.addCleanup(lambda: outside.unlink(missing_ok=True))
+        outside.write_bytes(b"should not be reachable")
+
+        self.assertFalse(
+            self.issuer.delete_blob("../escaped-delete-test-file"))
+        self.assertTrue(outside.is_file())
+
+    def test_delete_cannot_escape_the_root_via_a_deeper_path(self):
+        outside = self.root.parent / "escaped-delete-test-file"
+        self.addCleanup(lambda: outside.unlink(missing_ok=True))
+        outside.write_bytes(b"should not be reachable")
+
+        self.assertFalse(self.issuer.delete_blob(
+            "alice@example.com/../../escaped-delete-test-file"))
+        self.assertTrue(outside.is_file())
 
 
 class AzureIssuerTestCase(unittest.TestCase):
@@ -538,6 +608,52 @@ class TestAzureIssuerListBlobs(AzureIssuerTestCase):
 
         with self.assertRaises(SasError):
             self.issuer.list_blobs("chyde@neoformit.com/")
+
+
+class TestAzureIssuerDeleteBlob(AzureIssuerTestCase):
+
+    def test_delete_includes_snapshots(self):
+        # No snapshot policy exists on the container today; if one is ever
+        # added, a delete without this would start failing on any blob that
+        # has them.
+        container_client = mock.Mock()
+        self.client.get_container_client.return_value = container_client
+
+        self.assertTrue(self.issuer.delete_blob(BLOB_PATH))
+
+        self.client.get_container_client.assert_called_once_with(CONTAINER)
+        container_client.delete_blob.assert_called_once_with(
+            BLOB_PATH, delete_snapshots="include")
+
+    def test_a_missing_blob_is_false_not_an_exception(self):
+        container_client = mock.Mock()
+        container_client.delete_blob.side_effect = ResourceNotFoundError(
+            "gone")
+        self.client.get_container_client.return_value = container_client
+
+        self.assertFalse(self.issuer.delete_blob(BLOB_PATH))
+
+    def test_an_azure_failure_while_deleting_is_a_sas_error(self):
+        from azure.core.exceptions import ServiceRequestError
+        container_client = mock.Mock()
+        container_client.delete_blob.side_effect = ServiceRequestError(
+            "no route")
+        self.client.get_container_client.return_value = container_client
+
+        with self.assertRaises(SasError):
+            self.issuer.delete_blob(BLOB_PATH)
+
+    def test_the_raised_error_carries_only_the_exception_class_name(self):
+        from azure.core.exceptions import ServiceRequestError
+        container_client = mock.Mock()
+        container_client.delete_blob.side_effect = ServiceRequestError(
+            "credential secret in the message")
+        self.client.get_container_client.return_value = container_client
+
+        with self.assertRaises(SasError) as caught:
+            self.issuer.delete_blob(BLOB_PATH)
+
+        self.assertNotIn("secret", str(caught.exception))
 
 
 class TestCreateIssuer(unittest.TestCase):

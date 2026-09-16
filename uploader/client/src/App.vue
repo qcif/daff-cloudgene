@@ -5,7 +5,7 @@ import ExistingFiles from './components/ExistingFiles.vue';
 import ResultList from './components/ResultList.vue';
 import { UploadTask, STATE } from './upload.js';
 import { validateFile, ValidationError, ACCEPT_ATTRIBUTE } from './validate.js';
-import { listFiles, ApiError, AUTH_REDIRECT } from './api.js';
+import { listFiles, deleteFile, ApiError, AUTH_REDIRECT } from './api.js';
 
 const tasks = reactive([]);
 const rejections = ref([]);
@@ -18,6 +18,37 @@ const listError = ref(null);
 const authError = ref(null);
 
 const completedPaths = ref([]);
+
+// Blob paths with a delete in flight, and blob path -> message for the ones
+// that failed. Both are per row: one refused delete must not clear the
+// table or the upload results.
+const deletingPaths = ref([]);
+const deleteErrors = ref({});
+
+async function onDelete(file) {
+  const key = file.blob_path;
+  deletingPaths.value = [...deletingPaths.value, key];
+  deleteErrors.value = { ...deleteErrors.value, [key]: undefined };
+
+  try {
+    await deleteFile(file.client_path);
+    // `deleted: false` — the file was already gone and the list was stale —
+    // takes this same path. Drop the row so the UI answers immediately,
+    // then reload so the table reflects Azure rather than a guess.
+    existingFiles.value = existingFiles.value.filter(
+      (f) => f.blob_path !== key);
+    await loadExistingFiles();
+  } catch (err) {
+    // AUTH_REDIRECT means the page is already navigating away; anything
+    // else belongs against this row, verbatim — a 409 is actionable ("an
+    // upload to this path is in progress"), so it must not be reworded.
+    if (err instanceof ApiError && err.status !== AUTH_REDIRECT) {
+      deleteErrors.value = { ...deleteErrors.value, [key]: err.detail };
+    }
+  } finally {
+    deletingPaths.value = deletingPaths.value.filter((p) => p !== key);
+  }
+}
 
 async function loadExistingFiles() {
   existingLoading.value = true;
@@ -234,6 +265,9 @@ onBeforeUnmount(() => {
               :files="existingFiles"
               :truncated="existingTruncated"
               :loading="existingLoading"
+              :deleting="deletingPaths"
+              :delete-errors="deleteErrors"
+              @delete="onDelete"
             />
           </div>
         </div>

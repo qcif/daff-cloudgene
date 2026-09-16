@@ -32,6 +32,7 @@ All paths below are relative to `https://cloudgene.qcif.edu.au/uploads/api`.
 | `POST /uploads/{id}/renew` | `X-Auth-Token` | Re-sign the same blob path and extend `expires_at` |
 | `GET /uploads/{id}` | `X-Auth-Token` | Status of one upload, owner-scoped |
 | `GET /files` | `X-Auth-Token` | List the caller's own blobs, read from Azure and annotated with matching records |
+| `DELETE /files` | `X-Auth-Token` | Delete one blob from the caller's own prefix |
 | `GET /healthz` | none | Liveness of this process only |
 
 `POST /uploads` takes `{"filename": ..., "size": ..., "content_type": ...}`.
@@ -45,13 +46,47 @@ is still `pending`, and is bounded by a per-record cap
 `GET /files` takes no parameters — the prefix is always the caller's own
 (`naming.prefix_for(email)`), never influenced by the request. The result
 is capped at `UPLOADER_MAX_LIST_RESULTS` with a `truncated` flag rather than
-paginated.
+paginated. Each entry carries `blob_path`, `client_path`, `az_path`, `size`,
+`content_type` and `last_modified`, plus `upload_id` and `state` when a
+record matches. `client_path` is the portion after the caller's prefix — the
+value `DELETE /files` takes back, sent from here so the client never derives
+it by slicing a blob path.
+
+`DELETE /files` takes `{"client_path": "reads_R1.fastq.gz"}` — a path
+*within* the caller's own prefix, never a blob path. The server rebuilds the
+full path with `naming.build_blob_path(email, client_path)`, so naming
+another user's blob is not rejected so much as unexpressible, and every
+traversal defence in `naming.py` applies to deletion unchanged. The
+deletion runs server-side under the service principal, because every SAS
+this service issues is create-only (`sp=c`) and widening it to `d` would
+mean a leaked SAS could destroy data.
+
+It is idempotent: a blob that is already gone is `200` with
+`{"deleted": false, ...}`, not `404`. It is refused with `409` while an
+unexpired `pending` record exists for the path, since deleting does not
+revoke the outstanding SAS and an in-flight upload would re-create the blob
+afterwards. Records are never mutated by a delete — they are the issuance
+history, while the container is the truth about what exists.
+
+**Deletion is permanent.** Nothing in [`../azure.md`](../azure.md) enables
+blob soft delete or versioning on the storage account, so assume there is no
+undelete until an operator confirms otherwise:
+
+```sh
+az storage account blob-service-properties show \
+  --account-name "$AZURE_STORAGE_ACCOUNT" \
+  --query deleteRetentionPolicy
+```
 
 Errors: `401` not signed in, `403` no workflow access or no email on the
 account, `400` a failed validation check, `404` no such upload (or not
-yours), `409` a renewal on a terminal record, `429` rate limited or a spent
-renewal cap (with `Retry-After` on the former), `503` Cloudgene or Azure
-unavailable.
+yours), `409` a renewal on a terminal record or a delete racing a live
+upload, `429` rate limited or a spent renewal cap (with `Retry-After` on the
+former), `503` Cloudgene or Azure unavailable.
+
+There is no rate limit on deletion: a delete costs one Azure call and can
+only ever touch the caller's own prefix, whereas the issuance limiter exists
+because a SAS is a capability handed out.
 
 ## Environment variables
 

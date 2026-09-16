@@ -34,8 +34,8 @@ Alongside that flow: `GET /files` lists the caller's own prefix, read from
 Azure rather than the record table, and `DELETE /files` removes one blob
 from it. Both are owner-scoped by construction — the prefix comes from the
 resolved identity and never from the request. See
-[`tasks/08-delete-files.md`](tasks/08-delete-files.md) for the delete
-route's design.
+[`tasks/completed/08-delete-files.md`](tasks/completed/08-delete-files.md)
+for the delete route's design.
 
 ## Deletion
 
@@ -110,9 +110,6 @@ the `az://` listing, the create-only `409` — works fully offline. See
 
 ## Not yet built
 
-- `DELETE /files` and the `BlobDeleter` protocol — specified in
-  [`tasks/08-delete-files.md`](tasks/08-delete-files.md), not yet
-  implemented.
 - Automatic cleanup of abandoned *committed* blobs (uncommitted blocks are
   garbage-collected by Azure automatically after 7 days and need no code) —
   see `tasks/completed/2_azure_resources.md` §2.1. User-initiated deletion

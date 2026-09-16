@@ -118,3 +118,19 @@ export function getUpload(uploadId) {
 export function listFiles() {
   return request('/files', { method: 'GET' });
 }
+
+// Deletes one file from the caller's own prefix. `clientPath` is the
+// `client_path` field the list response carries — the leaf within that
+// prefix, never a blob path, and never derived here by slicing one: the
+// server rebuilds the full path from the identity it resolves.
+//
+// A DELETE with a JSON body, because blob paths contain '/' and an email
+// address and a path parameter would mean double-encoding through nginx.
+// Idempotent: a file that was already gone is a 200 with deleted: false.
+export function deleteFile(clientPath) {
+  return request('/files', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_path: clientPath }),
+  });
+}

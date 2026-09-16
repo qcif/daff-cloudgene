@@ -12,11 +12,14 @@ assumption has since been verified against real Azure (see
 holds: it is what let the rest of the service be tested without waiting on
 either.
 
-Two protocols rather than one. :class:`SasIssuer` is the interface §4.3 of
-the task brief specifies; :class:`BlobReader` is what post-hoc
-reconciliation (§10 of the spec) needs, and it is separate because a future
-reconciliation worker needs the reader without needing the signer. Both
-concrete classes implement both.
+Several narrow protocols rather than one wide one. :class:`SasIssuer` is the
+interface §4.3 of the task brief specifies; :class:`BlobReader` is what
+post-hoc reconciliation (§10 of the spec) needs; :class:`BlobLister` backs
+``GET /files``; :class:`BlobDeleter` backs ``DELETE /files``. They are
+separate because signing, reading, listing and deleting are four different
+capabilities — a reconciliation worker needs the reader without the signer,
+a cleanup sweep needs the deleter without either. Every concrete class here
+implements all four.
 
 SAS parameters (§7 of the spec), all asserted in the tests:
 
@@ -145,6 +148,26 @@ class BlobLister(Protocol):
 
     def list_blobs(self, prefix: str) -> list:
         """Return every blob whose name starts with ``prefix``."""
+        ...
+
+
+class BlobDeleter(Protocol):
+    """Removes one blob, server-side.
+
+    Its own protocol for the reason the three above are separate from each
+    other: signing, reading, listing and deleting are four different
+    capabilities, and the abandoned-blob sweep of
+    ``tasks/completed/2_azure_resources.md`` §2.1 would need delete without
+    ever needing to sign.
+
+    Deletion is server-side because every SAS this service issues is
+    ``sp=c``. Widening it to ``d`` so the browser could delete would mean a
+    leaked SAS could destroy data, which is the one thing create-only
+    guarantees it cannot.
+    """
+
+    def delete_blob(self, blob_path: str) -> bool:
+        """Delete ``blob_path``; return whether a blob was there to delete."""
         ...
 
 
@@ -353,6 +376,30 @@ class AzureUserDelegationSasIssuer:
             raise SasError(
                 f"Could not list blobs: {exc.__class__.__name__}") from exc
 
+    def delete_blob(self, blob_path: str) -> bool:
+        """Delete one blob under the service principal's own authority.
+
+        ``delete_snapshots="include"`` because a blob with snapshots cannot
+        be deleted without it: no snapshot policy exists on the container
+        today, and if one is ever added this call must not start failing.
+
+        A blob that is not there is not an error — the caller's request has
+        already been satisfied — so ``ResourceNotFoundError`` becomes
+        ``False`` rather than travelling as an exception.
+        """
+        try:
+            container_client = self._get_client().get_container_client(
+                self.container_name)
+            container_client.delete_blob(
+                blob_path, delete_snapshots="include")
+        except ResourceNotFoundError:
+            return False
+        except AzureError as exc:
+            raise SasError(
+                f"Could not delete blob: {exc.__class__.__name__}") from exc
+
+        return True
+
 
 LOCAL_STAGED_DIRNAME = ".staged"
 LOCAL_META_SUFFIX = ".meta"
@@ -485,6 +532,42 @@ class LocalFileSasIssuer:
 
         return sorted(results, key=lambda blob: blob.blob_path)
 
+    def delete_blob(self, blob_path: str) -> bool:
+        """Unlink the file, its sidecar, and any directory left empty.
+
+        Routed through the same :meth:`_resolve` as every other method, so
+        the directory-escape check is the one that is already tested rather
+        than a second path join written for deletion.
+        """
+        target = self._resolve(blob_path)
+        if target is None or not target.is_file():
+            return False
+
+        meta_path = target.with_name(target.name + LOCAL_META_SUFFIX)
+        target.unlink()
+        meta_path.unlink(missing_ok=True)
+
+        self._prune_empty_parents(target.parent)
+        return True
+
+    def _prune_empty_parents(self, directory: Path) -> None:
+        """Remove now-empty directories, stopping at the root.
+
+        Azure has no directories, so a local root that accumulates empty
+        ones after a delete would list differently from a real container —
+        it would not, since listing only walks files, but it would leave a
+        user's email directory behind after their last file is gone. Never
+        touches ``root`` itself, and never climbs past it.
+        """
+        root_resolved = self.root.resolve()
+        while (
+            directory != root_resolved
+            and root_resolved in directory.parents
+            and not any(directory.iterdir())
+        ):
+            directory.rmdir()
+            directory = directory.parent
+
 
 class FakeSasIssuer:
     """A stand-in for tests and for local development without credentials.
@@ -506,6 +589,10 @@ class FakeSasIssuer:
         self.account_url = config_module.BLOB_ENDPOINT_TEMPLATE.format(
             account=account_name)
         self.issued = []
+        # Every blob path this issuer was asked to delete, in order, so a
+        # test can assert that a rejected request reached storage not at
+        # all rather than merely failing afterwards.
+        self.delete_calls = []
         self._blobs = {}
 
     def issue(self, blob_path: str, expiry: datetime) -> IssuedSas:
@@ -561,6 +648,11 @@ class FakeSasIssuer:
             ),
             key=lambda blob: blob.blob_path,
         )
+
+    def delete_blob(self, blob_path: str) -> bool:
+        """Drop the pretend blob; return whether one was there."""
+        self.delete_calls.append(blob_path)
+        return self._blobs.pop(blob_path, None) is not None
 
 
 def _sas_timestamp(value: datetime) -> str:

@@ -9,7 +9,13 @@ vi.mock('../src/auth.js', () => ({
 }));
 
 import { getToken, redirectToLogin } from '../src/auth.js';
-import { ApiError, AUTH_REDIRECT, createUpload, listFiles } from '../src/api.js';
+import {
+  ApiError,
+  AUTH_REDIRECT,
+  createUpload,
+  deleteFile,
+  listFiles,
+} from '../src/api.js';
 
 function jsonResponse(status, body, headers = {}) {
   return {
@@ -116,5 +122,35 @@ describe('api request wrapper', () => {
   it('maps a network failure to 503', async () => {
     global.fetch.mockRejectedValue(new TypeError('network down'));
     await expect(listFiles()).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('sends a DELETE to /files with the client_path and the token', async () => {
+    global.fetch.mockResolvedValue(jsonResponse(200, {
+      deleted: true,
+      blob_path: 'user@example.com/reads.fastq.gz',
+      az_path: 'az://uploads/user@example.com/reads.fastq.gz',
+    }));
+
+    const result = await deleteFile('reads.fastq.gz');
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe('/uploads/api/files');
+    expect(options.method).toBe('DELETE');
+    expect(options.headers['X-Auth-Token']).toBe('a-token');
+    expect(options.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(options.body)).toEqual({
+      client_path: 'reads.fastq.gz',
+    });
+    expect(result.deleted).toBe(true);
+  });
+
+  it('surfaces a 409 from a delete verbatim', async () => {
+    global.fetch.mockResolvedValue(
+      jsonResponse(409, { detail: 'An upload to this path is in progress' }));
+
+    await expect(deleteFile('reads.fastq.gz')).rejects.toMatchObject({
+      status: 409,
+      detail: 'An upload to this path is in progress',
+    });
   });
 });
