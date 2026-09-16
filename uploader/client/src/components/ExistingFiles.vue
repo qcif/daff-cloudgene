@@ -1,4 +1,6 @@
 <script setup>
+import { useCopy } from '../clipboard.js';
+
 defineProps({
   files: { type: Array, required: true },
   truncated: { type: Boolean, default: false },
@@ -11,6 +13,9 @@ const badgeClass = {
   failed: 'badge-danger',
   expired: 'badge-secondary',
 };
+
+// Keyed by blob_path, so only the row just copied shows the acknowledgement.
+const { copied, copy } = useCopy();
 </script>
 
 <template>
@@ -30,8 +35,22 @@ const badgeClass = {
       </thead>
       <tbody>
         <tr v-for="f in files" :key="f.blob_path">
-          <td class="text-truncate" style="max-width: 20rem">
-            {{ f.blob_path }}
+          <td style="max-width: 28rem">
+            <div class="d-flex align-items-center">
+              <span class="text-truncate text-monospace" :title="f.az_path">
+                {{ f.az_path || '—' }}
+              </span>
+              <button
+                v-if="f.az_path"
+                type="button"
+                class="btn btn-sm btn-link p-0 ml-2 flex-shrink-0"
+                :title="`Copy ${f.az_path}`"
+                @click="copy(f.az_path, f.blob_path)"
+              >
+                <i class="fas" :class="copied === f.blob_path ? 'fa-check' : 'fa-copy'"></i>
+                <span class="sr-only">Copy path</span>
+              </button>
+            </div>
           </td>
           <td>{{ (f.size / 1e6).toFixed(1) }} MB</td>
           <td>{{ f.last_modified ? new Date(f.last_modified).toLocaleString() : '—' }}</td>
