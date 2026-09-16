@@ -89,8 +89,9 @@ the `az://` listing, the create-only `409` — works fully offline. See
   garbage-collected by Azure automatically after 7 days and need no code) —
   see `tasks/2_azure_resources.md` §2.1.
 - The Vue frontend.
-- Deployment itself: `../uploads.service` and `../nginx-uploads.conf` are
-  written, not installed.
+- Deployment itself: `../deploy/uploads.service` and
+  `../deploy/nginx-uploads.conf` are written, not installed. See
+  `../deploy/README.md`.
 
 ## Constraints that shape everything above
 

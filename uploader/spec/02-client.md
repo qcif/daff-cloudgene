@@ -207,7 +207,7 @@ and the transfer manually once the container is reachable.
 
 This is the first build-tooled frontend in the repo — the downloader is a
 single `index.html` with no build step — and
-[`../nginx-uploads.conf`](../nginx-uploads.conf) aliases `/uploads/` straight
+[`../deploy/nginx-uploads.conf`](../deploy/nginx-uploads.conf) aliases `/uploads/` straight
 at `uploader/client/dist/` inside the deployed checkout. So either:
 
 - **Commit `dist/`** (recommended). Deployment stays `git pull`, and the

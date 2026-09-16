@@ -35,4 +35,7 @@ taxodactyl.yml -> /mnt/data/apps/taxodactyl/v1.3.3-1/cloudgene.yml
 ## ./uploader/ - Azure Blob Uploader
 
 This service allows authenticated users to upload input data directly to Azure
-Blob storage.
+Blob storage. [`uploader/deploy/`](uploader/deploy/) is the deployment
+package — a systemd unit, an nginx snippet, and the operator runbook
+([`uploader/deploy/README.md`](uploader/deploy/README.md)) for installing
+both on `cloudgene.qcif.edu.au`.

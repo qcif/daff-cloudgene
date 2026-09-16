@@ -1,0 +1,144 @@
+[Unit]
+Description=Azure uploader API (FastAPI)
+# Ordering only, not a hard dependency: uploads.service does not need
+# cloudgene.service to be enabled or present to make sense as a unit, but at
+# boot it must not race it. startup_self_test() calls
+# CLOUDGENE_BASE_URL/api/v2/server, which in production is Cloudgene on
+# loopback (port 8082) — if uploads.service starts first, that call fails
+# for a reason that has nothing to do with its own configuration.
+# Wants= (a soft dependency) is added alongside so that starting this unit
+# also attempts to start cloudgene.service if it is not already up, which
+# costs nothing when Cloudgene is already enabled (the normal case) and
+# helps when it is not. Paired with the restart budget below so a Cloudgene
+# that is merely slow to bind port 8082 is survived by the retries.
+After=network-online.target cloudgene.service
+Wants=network-online.target cloudgene.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=@REPO_ROOT@/uploader/api
+Environment=HOST=127.0.0.1
+Environment=PORT=8003
+
+# Cloudgene validation over loopback. Confirmed working without a Host
+# header, at a median of 6.6 ms (Task 1 runbook, B1-B4), which is why the
+# identity cache was dropped entirely.
+Environment=CLOUDGENE_BASE_URL=http://127.0.0.1:8082
+
+# Non-secret Azure settings. The account name is confirmed; the container
+# does not exist yet (Task 2 §2).
+Environment=UPLOADER_SAS_ISSUER=azure
+Environment=AZURE_STORAGE_ACCOUNT=daffstandard
+Environment=AZURE_STORAGE_CONTAINER=uploads
+
+# Pending-upload records. SQLite, WAL mode, inside ReadWritePaths below.
+Environment=UPLOADER_DB_PATH=@REPO_ROOT@/uploader/api/uploads.sqlite3
+
+# AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_CERTIFICATE_PATH live
+# here, NOT in this file: a unit file is world-readable. Create it outside
+# the repo, owned root:www-data, mode 0640, one KEY=value per line.
+#
+#     install -o root -g www-data -m 0640 /dev/null /etc/uploads.env
+#
+# The service authenticates to Entra with a certificate, not a client
+# secret. AZURE_CLIENT_CERTIFICATE_PATH points at the PEM holding both the
+# private key and the certificate, as produced by
+# `az ad sp create-for-rbac --create-cert` (see uploader/azure.md).
+#
+#     install -o www-data -g www-data -m 0600 azure-cert.pem \
+#         /etc/cloudgene-uploader/azure-cert.pem
+#
+# The service refuses to start if any of the three is missing, if the PEM
+# is absent or unreadable, or if it is world-readable — see
+# config._certificate_path. The certificate expires 3 years from creation;
+# rotation is in uploader/azure.md.
+#
+# EnvironmentFile= is listed after the Environment= lines above and
+# therefore wins on conflict — this is systemd's normal last-one-wins
+# behaviour, not a mistake. Decision: keep it that way. It is a useful
+# escape hatch (an operator can override any non-secret default above
+# without editing this unit), but it also means /etc/uploads.env can
+# silently flip UPLOADER_SAS_ISSUER to `local` or `fake`, which would start
+# cleanly while quietly writing every upload to a directory on this VM
+# instead of Azure. Deploy/README.md §9 makes the post-install journal
+# check the thing that catches this: startup always logs the resolved
+# issuer, and azure_sas.create_issuer() logs a WARNING naming FAKE or LOCAL
+# whenever either is in effect, so a wrong override is a glance at
+# `journalctl -t uploads`, not an audit.
+EnvironmentFile=/etc/uploads.env
+
+ExecStart=@REPO_ROOT@/uploader/venv/bin/uvicorn app:app --host=${HOST} --port=${PORT} --workers=2
+Restart=on-failure
+RestartSec=2
+
+# A misconfigured service (failed lifespan contract check, the
+# fake-auth/azure-issuer interlock, an unreadable certificate) can never
+# succeed by retrying, so Restart=on-failure with no cap would spin forever
+# and bury the one real error under thousands of identical journal entries.
+# 15 attempts at 2s apart is ~30s of restarts before systemd gives up and
+# leaves the unit in `failed`, where `systemctl status` shows the reason
+# once instead of on a loop. 30s is also enough slack for the boot-race
+# case in the After=/Wants= lines above: Cloudgene's JVM start is the only
+# realistic source of a slow-but-eventually-successful retry here, and it
+# has not been observed to take anywhere near that long on this host.
+StartLimitIntervalSec=30
+StartLimitBurst=15
+
+# The journal names these logs `uploads` instead of `uvicorn`, so
+# `journalctl -t uploads` and `journalctl -u uploads` agree and a shared
+# process name doesn't get confused with any other uvicorn-run service on
+# the host (downloader/downloads.service also runs uvicorn).
+SyslogIdentifier=uploads
+
+# The SQLite database (UPLOADER_DB_PATH above) holds user email addresses
+# and blob paths. 0077 keeps it (and anything else the process creates)
+# unreadable by other local users regardless of the directory's own mode.
+UMask=0077
+
+# Basic hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@REPO_ROOT@/uploader
+AmbientCapabilities=
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+
+# AF_INET and AF_INET6 are enough for a resolver that talks DNS directly
+# over UDP/TCP. They are NOT enough if NSS resolves hostnames through the
+# `resolve` module (systemd-resolved), which is reached over a unix
+# socket — and this service resolves an external hostname
+# (login.microsoftonline.com) on every token acquisition, unlike
+# downloader/downloads.service, which has the same restriction but never
+# does that, so its unit is not evidence either way.
+#
+# preflight.sh's check-dns-resolver step reports which NSS module this
+# host uses. If it reports the `resolve` module, add AF_UNIX to the line
+# below BEFORE first start:
+#
+#     RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+#
+# Left as AF_INET AF_INET6 here because the answer depends on the host and
+# has not been determined — see deploy/README.md's prerequisite checklist.
+RestrictAddressFamilies=AF_INET AF_INET6
+
+# Cheap and safe per `systemd-analyze security`: none of these touch a
+# resource the Azure SDK, SQLite or uvicorn need. Record the tool's actual
+# score in deploy/README.md after install; do not chase it further than
+# this list — a directive that breaks a real request at runtime costs more
+# than the score buys.
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+PrivateDevices=yes
+SystemCallFilter=@system-service
+
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

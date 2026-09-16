@@ -90,7 +90,7 @@ Optional:
 | `UPLOADER_LOG_LEVEL` | `INFO` | |
 
 The three Azure credentials are supplied by an `EnvironmentFile` outside the
-repo — see [`../uploads.service`](../uploads.service). A systemd unit file is
+repo — see [`../deploy/uploads.service`](../deploy/uploads.service). A systemd unit file is
 world-readable, so a secret inlined there is a secret published.
 
 In production every setting above always comes from the real process
@@ -163,6 +163,6 @@ Lint:
 
 ## Deployment
 
-Not performed by this repo. `../uploads.service` and
-`../nginx-uploads.conf` are written for an operator to install; neither has
-been applied.
+Not performed by this repo. [`../deploy/README.md`](../deploy/README.md) is
+the operator runbook; nothing in [`../deploy/`](../deploy/) has been
+applied.

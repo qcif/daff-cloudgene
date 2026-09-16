@@ -149,7 +149,7 @@ per-job location first. It affects nothing in the uploader's design, but it
 decides whether the `user-email/` prefix scheme in §7 of the spec has to be
 legible to the Nextflow side as well.
 
-## 4. CORS on the Blob service (to configure)
+## 4. CORS on the Blob service (applied 2026-09-16)
 
 Configured **on the storage account**, not in FastAPI — FastAPI's CORS
 middleware has no bearing on requests the browser makes to
@@ -159,32 +159,40 @@ middleware has no bearing on requests the browser makes to
 |---|---|
 | Allowed origins | `https://cloudgene.qcif.edu.au` — exactly this, not `*` |
 | Allowed methods | `PUT`, `OPTIONS` (add `GET`/`HEAD` only if the client reads blobs directly) |
-| Allowed headers | `x-ms-blob-type`, `x-ms-blob-content-type`, `content-type`, `content-length`, **`x-ms-version`, `x-ms-client-request-id`** |
+| Allowed headers | `x-ms-blob-type`, `x-ms-blob-content-type`, `content-type`, `content-length`, `x-ms-version`, `x-ms-client-request-id`, `x-ms-useragent` — **all seven**, see below |
 | Exposed headers | `etag`, `x-ms-request-id` |
 | Max age | 3600 |
 
 A failed preflight surfaces in the browser as an opaque network error with no
 useful detail, so this is worth verifying in isolation before debugging any
-upload logic.
+upload logic. The command that applies it, and a credential-free `OPTIONS`
+probe that checks the applied rule without needing an upload, are in
+[`azure.md`](../../../azure.md) §CORS designation.
 
-> **Escalated 2026-09-15, from
-> [`06-mock-azure.md`](../06-mock-azure.md) §4:** the Allowed headers row
-> above is missing headers. Measuring the actual requests the bundled SDK
-> issues (`BlockBlobClient` against a plain HTTP host) showed every `PUT`
-> carrying `x-ms-version` and `x-ms-client-request-id`, and both appear in
-> the preflight's `Access-Control-Request-Headers`. Neither was in the
-> original list above, which as written would fail preflight in
-> production — surfacing as exactly the opaque network error warned about
-> two paragraphs up. **A live end-to-end run against a real browser (the
-> §9 verification of `06-mock-azure.md`) turned up a third, missed for the
-> same reason: `x-ms-useragent`** — client telemetry (SDK, pipeline and
-> browser versions) the SDK also sets on every request unconditionally.
-> Static measurement of the SDK's outgoing calls did not catch it; only
-> driving a real preflight in a real browser did. **All three bolded
-> headers need to be added to the Allowed headers list when this rule is
-> applied.** The local dev stand-in (`uploader/devblob/`) already accepts
-> the full set, so this only affects the real storage account, which has
-> not had this rule applied yet.
+> **Applied 2026-09-16, replacing the four-header rule.** The Allowed
+> headers row above originally listed four headers. That rule has been
+> removed and replaced with the seven-header rule shown, which is what is
+> now live on the storage account. The three additions are not optional and
+> not defensive — the SDK the client bundles sends every one of them on
+> every request, so the original rule would have failed preflight on the
+> first upload.
+>
+> How each was found, because the method matters for the next rule someone
+> writes:
+>
+> - `x-ms-version` and `x-ms-client-request-id` — by measuring the actual
+>   requests `BlockBlobClient` issues against a plain HTTP host
+>   ([`06-mock-azure.md`](../06-mock-azure.md) §0). Both appear in the
+>   preflight's `Access-Control-Request-Headers`.
+> - `x-ms-useragent` — only by driving a real preflight in a real browser
+>   (the §9 verification of the same task). It is client telemetry (SDK,
+>   pipeline and browser versions) that the SDK sets unconditionally, and
+>   static measurement of its outgoing calls did not surface it.
+>
+> **Reading the SDK is not sufficient to enumerate a CORS allow-list; only
+> a live browser preflight is.** The local dev stand-in
+> (`uploader/devblob/`) accepts the full set, so a working local upload
+> was never evidence that the production rule was complete.
 
 ## 5. Network egress from the Cloudgene server
 
@@ -219,4 +227,5 @@ Once created, the uploader needs:
 - The secret's expiry date
 - Confirmation the role assignment is on the container scope
 - Confirmation that the Batch identity can read the container (§3.1)
-- Confirmation that CORS is applied and egress is open
+- ~~Confirmation that CORS is applied~~ — done 2026-09-16, §4
+- Confirmation that egress is open

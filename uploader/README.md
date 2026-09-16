@@ -211,34 +211,16 @@ change committed without its rebuilt `dist/` deploys nothing.
 
 ## Deployment — operator only
 
-**Not yet applied.** Both files are written for an operator to install; no
+**Not yet applied.** The full runbook — prerequisites, install, upgrade,
+rollback and verification — is [`deploy/README.md`](deploy/README.md). No
 agent deploys, restarts or edits anything on `cloudgene.qcif.edu.au`, and
 verification against the live host is read-only `GET` requests or manual
 operator steps, never a shell.
 
 | File | Installs as |
 |---|---|
-| [`uploads.service`](uploads.service) | `/etc/systemd/system/uploads.service` |
-| [`nginx-uploads.conf`](nginx-uploads.conf) | pasted into the vhost, above the `location / ` Cloudgene proxy |
-
-Three things must be true before the service will start, and each has been
-made a hard failure rather than a silent degradation:
-
-1. **The Azure credentials exist.** `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
-   `AZURE_CLIENT_CERTIFICATE_PATH` come from an `EnvironmentFile` at
-   `/etc/uploads.env`, outside the repo — a systemd unit file is
-   world-readable, so a secret inlined there is a secret published.
-2. **The certificate is readable and not world-readable.** The service
-   principal authenticates with a certificate, not a client secret; the PEM
-   holds its private key. Provisioning and rotation are in
-   [`azure.md`](azure.md). It expires three years after creation.
-3. **Cloudgene answers on the configured base URL.** In production that is
-   `http://127.0.0.1:8082` over loopback.
-
-Separately, and easy to miss because it fails as an opaque browser network
-error with no useful detail: **CORS is configured on the storage account**,
-not in FastAPI. FastAPI's CORS middleware has no bearing on requests the
-browser makes to `*.blob.core.windows.net`. The required rule — exact SPA
-origins, never `*` — is in
-[`spec/client-azure-upload.md`](spec/client-azure-upload.md) §8. Verify it
-in isolation before debugging upload logic.
+| [`deploy/uploads.service`](deploy/uploads.service) | `/etc/systemd/system/uploads.service` |
+| [`deploy/nginx-uploads.conf`](deploy/nginx-uploads.conf) | pasted into the vhost, above the `location / ` Cloudgene proxy |
+| [`deploy/uploads.env.sample`](deploy/uploads.env.sample) | filled in and copied to `/etc/uploads.env` |
+| [`deploy/preflight.sh`](deploy/preflight.sh) | run before installing; checks the host is ready |
+| [`deploy/install.sh`](deploy/install.sh) | optional first-deploy convenience script |
