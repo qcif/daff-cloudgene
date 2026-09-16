@@ -161,8 +161,8 @@ onBeforeUnmount(() => {
               >Run</a
             >
             <div class="dropdown-menu" aria-labelledby="dropdown01">
-              <a class="dropdown-item" href="/#!run/taxodactyl@1.2.0"
-                >Taxodactyl <small class="text-muted">1.2.0</small></a
+              <a class="dropdown-item" href="/#!run/taxodactyl_150@1.5.0"
+                >Taxodactyl <small class="text-muted">1.5.0</small></a
               >
             </div>
           </li>
@@ -171,18 +171,18 @@ onBeforeUnmount(() => {
             <a class="nav-link" href="/#!pages/jobs">Jobs</a>
           </li>
 
-          <li class="nav-item active">
-            <a class="nav-link" href="/uploads/">Upload <span class="sr-only">(current)</span></a>
-          </li>
-
-          <li class="nav-item">
-            <a class="nav-link" href="/download">Download</a>
-          </li>
-
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="docs">Docs</a>
             <div class="dropdown-menu" aria-labelledby="docs">
-                <a class="dropdown-item" href="/#!pages/taxodactyl">Taxodactyl</a>
+              <a class="dropdown-item" href="/#!pages/taxodactyl">Taxodactyl</a>
+            </div>
+          </li>
+
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="tools">Tools</a>
+            <div class="dropdown-menu" aria-labelledby="docs">
+              <a class="dropdown-item" href="/validation/">Taxodactyl input validation</a>
+              <a class="dropdown-item" href="/uploads/">Upload input data</a>
             </div>
           </li>
 
@@ -214,6 +214,16 @@ onBeforeUnmount(() => {
   </nav>
 
   <div class="container mt-5 pt-5">
+    <div class="mb-3">
+      <p>
+        Use this tool to upload large (1GB+) files to be used as input data for your workflow runs. This will upload the files directly to Azure Blob, and return an <code>az://</code> URL for your files that can be pasted directly into your samplesheet.csv to be submitted to the workflow.
+      </p>
+
+      <p>
+        This is the fastest and most robust method for uploading large amounts of data, and is intended for use withflows that take sequencing reads as input.
+      </p>
+    </div>
+
     <div class="row justify-content-center">
       <div class="col">
         <div class="card shadow mb-4">
