@@ -122,15 +122,22 @@ middleware has no bearing on requests the browser makes to
 opaque network error with no useful detail, so verify it in isolation
 (bottom of this section) before debugging any upload logic.
 
-**Seven allowed headers, not four.** The SDK the client bundles
+**Eight allowed headers, not four.** The SDK the client bundles
 (`@azure/storage-blob` `BlockBlobClient`) sends `x-ms-version`,
 `x-ms-client-request-id` and `x-ms-useragent` on every request, and lists
 all three in the preflight's `Access-Control-Request-Headers`. None was in
 the original list; any one of them missing fails every upload. The first two
 were found by measuring the SDK's outgoing calls, the third only by driving
-a real preflight in a real browser — see the escalation in
+a real preflight in a real browser. The eighth, `content-md5`, carries the
+per-block integrity hash and was added with that check; **without it every
+block upload fails its preflight**. See the escalation in
 [`spec/tasks/completed/2_azure_resources.md`](spec/tasks/completed/2_azure_resources.md)
 §4.
+
+Run `az storage cors clear --account-name "$STORAGE_ACCOUNT_STD" --services b
+--auth-mode login` first: `cors add` appends, and Azure matches by origin and
+method without falling through, so a stale rule shadows the new one (the
+`content-md5` header was refused until the old rule was cleared).
 
 ```sh
 az storage cors add \
@@ -146,6 +153,7 @@ az storage cors add \
       x-ms-version \
       x-ms-client-request-id \
       x-ms-useragent \
+      content-md5 \
   --exposed-headers etag x-ms-request-id \
   --max-age 3600 \
   --auth-mode login
@@ -191,7 +199,7 @@ az rest --method put \
           {
             "allowedOrigins": ["https://cloudgene.qcif.edu.au"],
             "allowedMethods": ["PUT", "OPTIONS"],
-            "allowedHeaders": ["x-ms-blob-type", "x-ms-blob-content-type", "content-type", "content-length", "x-ms-version", "x-ms-client-request-id", "x-ms-useragent"],
+            "allowedHeaders": ["x-ms-blob-type", "x-ms-blob-content-type", "content-type", "content-length", "x-ms-version", "x-ms-client-request-id", "x-ms-useragent", "content-md5"],
             "exposedHeaders": ["etag", "x-ms-request-id"],
             "maxAgeInSeconds": 3600
           }

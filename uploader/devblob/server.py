@@ -24,6 +24,8 @@ The real risk of a hand-rolled stand-in is a client bug that passes here
 and fails against production; loud rejection is what keeps the two in step.
 """
 
+import base64
+import hashlib
 import logging
 import os
 import sys
@@ -59,6 +61,8 @@ DEFAULT_ROOT = "/tmp/uploader-blobs"
 ENV_DEV_ORIGIN = "UPLOADER_DEV_ORIGIN"
 DEFAULT_DEV_ORIGIN = "http://localhost:5173"
 
+MD5_DIGEST_BYTES = 16
+
 COMP_BLOCK = "block"
 COMP_BLOCKLIST = "blocklist"
 
@@ -81,6 +85,8 @@ CORS_ALLOWED_HEADERS = [
     "x-ms-version",
     "x-ms-client-request-id",
     "x-ms-useragent",
+    # Sent with every block so Azure (and this stand-in) can verify the body.
+    "content-md5",
 ]
 CORS_EXPOSED_HEADERS = ["etag", "x-ms-request-id"]
 CORS_MAX_AGE = 3600
@@ -129,6 +135,14 @@ def parse_block_list(xml_body: bytes) -> list:
 def _local_tag(tag: str) -> str:
     """Strip any XML namespace off an element tag."""
     return tag.rsplit("}", 1)[-1]
+
+
+def _is_valid_md5_header(value: str) -> bool:
+    """True if ``value`` is standard base64 of exactly 16 bytes."""
+    try:
+        return len(base64.b64decode(value, validate=True)) == MD5_DIGEST_BYTES
+    except ValueError:
+        return False
 
 
 def _validate_blob_path(container: str, blob_path: str) -> str:
@@ -213,6 +227,20 @@ def create_app(root=None) -> FastAPI:
                     400, "MissingRequiredQueryParameter",
                     "blockid is required when comp=block")
             body = await request.body()
+            claimed_md5 = request.headers.get("content-md5")
+            if claimed_md5:
+                if not _is_valid_md5_header(claimed_md5):
+                    return azure_error(
+                        400, "InvalidMd5",
+                        "The value for one of the HTTP headers is not in "
+                        "the correct format.")
+                actual_md5 = base64.b64encode(
+                    hashlib.md5(body).digest()).decode()
+                if claimed_md5 != actual_md5:
+                    return azure_error(
+                        400, "Md5Mismatch",
+                        "The MD5 value specified in the request did not "
+                        "match the MD5 value calculated by the server.")
             store.stage_block(validated_path, block_id, body)
             return Response(status_code=201, headers={
                 "x-ms-request-id": FAKE_REQUEST_ID,

@@ -11,6 +11,18 @@ vi.mock('@azure/storage-blob', () => ({
   })),
 }));
 
+// Test files are plain {start, end} objects with no bytes to hash.
+vi.mock('../src/checksum.js', async () => {
+  const actual = await vi.importActual('../src/checksum.js');
+  return {
+    ...actual,
+    readBlock: vi.fn(async (chunk) => ({
+      data: chunk,
+      md5: new Uint8Array(16),
+    })),
+  };
+});
+
 vi.mock('../src/api.js', async () => {
   const actual = await vi.importActual('../src/api.js');
   return {
@@ -23,7 +35,7 @@ vi.mock('../src/api.js', async () => {
 
 import { BlockBlobClient } from '@azure/storage-blob';
 import { ApiError, createUpload, renewUpload, completeUpload } from '../src/api.js';
-import { BLOCK_SIZE, STATE, UploadTask, blockCount, blockId } from '../src/upload.js';
+import { BLOCK_SIZE, MAX_CHECKSUM_ATTEMPTS, STATE, checksumRetry, UploadTask, blockCount, blockId } from '../src/upload.js';
 
 function fakeFile(name, size) {
   return {
@@ -67,6 +79,7 @@ describe('UploadTask', () => {
     vi.clearAllMocks();
     stageBlock.mockReset();
     commitBlockList.mockReset();
+    checksumRetry.baseDelayMs = 0;
   });
 
   it('sets the content type on commitBlockList, matching the declaration', async () => {
@@ -219,6 +232,129 @@ describe('UploadTask', () => {
 
     expect(task.state).toBe(STATE.FAILED);
     expect(task.error).toContain('does not match the declared');
+  });
+
+  it('sends a Content-MD5 with every block', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u8',
+      upload_url: 'https://blob/u8',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u8',
+    });
+    stageBlock.mockResolvedValue(undefined);
+    commitBlockList.mockResolvedValue(undefined);
+    completeUpload.mockResolvedValue({ state: 'completed' });
+
+    await new UploadTask(fakeFile('reads.csv', 10)).start();
+
+    expect(stageBlock).toHaveBeenCalledWith(
+      blockId(0), expect.anything(), 10,
+      expect.objectContaining({ transactionalContentMD5: expect.any(Uint8Array) }),
+    );
+  });
+
+  it('re-sends just the block whose checksum mismatched', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u9',
+      upload_url: 'https://blob/u9',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u9',
+    });
+    let badOnce = true;
+    stageBlock.mockImplementation(async (id) => {
+      if (id === blockId(1) && badOnce) {
+        badOnce = false;
+        throw Object.assign(new Error('md5'), { code: 'Md5Mismatch', statusCode: 400 });
+      }
+    });
+    commitBlockList.mockResolvedValue(undefined);
+    completeUpload.mockResolvedValue({ state: 'completed' });
+
+    const task = new UploadTask(fakeFile('big.gz', 2 * BLOCK_SIZE));
+    await task.start();
+
+    expect(task.state).toBe(STATE.COMPLETE);
+    const calls = stageBlock.mock.calls.map((c) => c[0]);
+    expect(calls.filter((id) => id === blockId(0))).toHaveLength(1);
+    expect(calls.filter((id) => id === blockId(1))).toHaveLength(2);
+    // Progress counts the block once, not once per attempt.
+    expect(task.bytesStaged).toBe(2 * BLOCK_SIZE);
+  });
+
+  it('fails the upload only after a block keeps failing its checksum', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u10',
+      upload_url: 'https://blob/u10',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u10',
+    });
+    stageBlock.mockRejectedValue(
+      Object.assign(new Error('md5'), { code: 'Md5Mismatch', statusCode: 400 }));
+
+    const task = new UploadTask(fakeFile('bad.csv', 10));
+    await task.start();
+
+    expect(stageBlock).toHaveBeenCalledTimes(MAX_CHECKSUM_ATTEMPTS);
+    expect(task.state).toBe(STATE.FAILED);
+    expect(task.error).toContain('integrity check');
+    expect(commitBlockList).not.toHaveBeenCalled();
+  });
+
+  it('backs off exponentially between checksum retries', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u11',
+      upload_url: 'https://blob/u11',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u11',
+    });
+    stageBlock.mockRejectedValue(
+      Object.assign(new Error('md5'), { code: 'Md5Mismatch', statusCode: 400 }));
+    checksumRetry.baseDelayMs = 100;
+
+    const task = new UploadTask(fakeFile('bad.csv', 10));
+    const sleep = vi.spyOn(task, '_sleep').mockResolvedValue(undefined);
+    await task.start();
+
+    expect(sleep.mock.calls.map((c) => c[0])).toEqual([100, 200, 400]);
+  });
+
+  it('keeps the Azure error as the cause of an integrity failure', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u12',
+      upload_url: 'https://blob/u12',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u12',
+    });
+    const azureErr = Object.assign(
+      new Error('md5'), { code: 'Md5Mismatch', statusCode: 400 });
+    stageBlock.mockRejectedValue(azureErr);
+
+    const task = new UploadTask(fakeFile('bad.csv', 10));
+    let thrown;
+    vi.spyOn(task, '_fail').mockImplementation((err) => { thrown = err; });
+    await task.start();
+
+    expect(thrown.cause).toBe(azureErr);
+  });
+
+  it('reports a cancel during the final attempt as a cancel, not an integrity failure', async () => {
+    createUpload.mockResolvedValue({
+      upload_id: 'u13',
+      upload_url: 'https://blob/u13',
+      expires_at: futureIso(24 * 60 * 60 * 1000),
+      az_path: 'az://uploads/u13',
+    });
+    const task = new UploadTask(fakeFile('bad.csv', 10));
+    stageBlock.mockImplementation(async () => {
+      task.cancel();
+      throw Object.assign(new Error('md5'), { code: 'Md5Mismatch' });
+    });
+
+    await task.start();
+
+    expect(task.state).toBe(STATE.CANCELLED);
+    expect(task.error).toBeNull();
+    expect(stageBlock).toHaveBeenCalledTimes(1);
   });
 
   it('cancel() aborts before commit and moves to CANCELLED', async () => {

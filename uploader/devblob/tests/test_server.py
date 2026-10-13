@@ -9,6 +9,7 @@ drives the ASGI app in-process.
 """
 
 import base64
+import hashlib
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -178,6 +179,46 @@ class TestTraversal(ServerTestCase):
         self.assertEqual(written, [])
 
 
+class TestBlockChecksum(ServerTestCase):
+
+    @staticmethod
+    def md5_of(body: bytes) -> str:
+        return base64.b64encode(hashlib.md5(body).digest()).decode()
+
+    def stage_with_md5(self, body, md5):
+        return self.client.put(
+            f"/{CONTAINER}/{BLOB_PATH}",
+            params={"comp": "block", "blockid": block_id(0),
+                    **_split_query(sas_query())},
+            content=body,
+            headers={"Content-MD5": md5},
+        )
+
+    def test_matching_md5_is_accepted(self):
+        body = b"ACGT" * 100
+        response = self.stage_with_md5(body, self.md5_of(body))
+        self.assertEqual(response.status_code, 201)
+
+    def test_mismatched_md5_is_rejected_and_not_staged(self):
+        response = self.stage_with_md5(b"ACGT", self.md5_of(b"TTTT"))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.headers["x-ms-error-code"], "Md5Mismatch")
+
+    def test_malformed_md5_is_invalid_md5_not_a_mismatch(self):
+        body = b"ACGT"
+        for bad in (hashlib.md5(body).hexdigest(), "not base64!!", "AAAA"):
+            with self.subTest(value=bad):
+                response = self.stage_with_md5(body, bad)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.headers["x-ms-error-code"], "InvalidMd5")
+
+    def test_missing_md5_is_still_accepted(self):
+        response = self.stage(BLOB_PATH, 0, b"ACGT")
+        self.assertEqual(response.status_code, 201)
+
+
 class TestCorsPreflight(ServerTestCase):
 
     def test_preflight_allows_the_measured_request_headers(self):
@@ -202,6 +243,17 @@ class TestCorsPreflight(ServerTestCase):
                 "x-ms-version", "x-ms-client-request-id",
                 "x-ms-useragent"):
             self.assertIn(header, allowed)
+
+    def test_preflight_allows_content_md5(self):
+        response = self.client.options(
+            f"/{CONTAINER}/{BLOB_PATH}",
+            headers={
+                "Origin": DEV_ORIGIN,
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "content-md5",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
 
     def test_only_the_dev_origin_is_allowed(self):
         response = self.client.options(

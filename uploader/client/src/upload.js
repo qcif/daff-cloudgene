@@ -11,10 +11,16 @@
 import { BlockBlobClient } from '@azure/storage-blob';
 import { createUpload, renewUpload, completeUpload, ApiError } from './api.js';
 import { contentTypeFor } from './validate.js';
+import { isChecksumMismatch, readBlock } from './checksum.js';
 
 export const BLOCK_SIZE = 4 * 1024 * 1024;
 export const CONCURRENCY = 6;
 export const RENEW_BEFORE_EXPIRY_MS = 60 * 60 * 1000;
+// Attempts per block when Azure reports the body didn't match its Content-MD5.
+export const MAX_CHECKSUM_ATTEMPTS = 4;
+// Delay before re-sending a block that failed its checksum: base * 2^(n-1).
+// An object so tests can zero it without fake timers.
+export const checksumRetry = { baseDelayMs: 1000 };
 
 export const STATE = Object.freeze({
   QUEUED: 'queued',
@@ -190,15 +196,34 @@ export class UploadTask {
     const chunk = this.file.slice(start, end);
     const size = end - start;
 
-    try {
-      await this._stageChunk(index, chunk, size);
-    } catch (err) {
-      if (this._isForbidden(err)) {
-        await this._renewReactively();
+    let renewed = false;
+    let mismatches = 0;
+    while (true) {
+      try {
         await this._stageChunk(index, chunk, size);
-        return;
+        break;
+      } catch (err) {
+        if (this._abortController.signal.aborted) throw err;
+        if (isChecksumMismatch(err)) {
+          // Corrupted in transit: re-read, re-hash and re-send only this
+          // block rather than failing the whole upload.
+          mismatches += 1;
+          if (mismatches >= MAX_CHECKSUM_ATTEMPTS) {
+            throw new TerminalUploadError(
+              `Block ${index} failed its integrity check `
+              + `${mismatches} times. Check your connection and retry.`,
+              { cause: err });
+          }
+          await this._sleep(
+            checksumRetry.baseDelayMs * 2 ** (mismatches - 1));
+          if (this._abortController.signal.aborted) throw err;
+        } else if (this._isForbidden(err) && !renewed) {
+          renewed = true;
+          await this._renewReactively();
+        } else {
+          throw err;
+        }
       }
-      throw err;
     }
 
     this._stagedIndices.add(index);
@@ -206,9 +231,15 @@ export class UploadTask {
     this.onChange(this);
   }
 
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async _stageChunk(index, chunk, size) {
-    await this._blockBlobClient.stageBlock(blockId(index), chunk, size, {
+    const { data, md5 } = await readBlock(chunk);
+    await this._blockBlobClient.stageBlock(blockId(index), data, size, {
       abortSignal: this._abortController.signal,
+      transactionalContentMD5: md5,
     });
   }
 

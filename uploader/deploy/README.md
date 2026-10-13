@@ -41,9 +41,12 @@ maintenance window gets spent.
       Contributor` at *container* scope. A container-scoped Delegator fails
       at runtime with an authorisation error that looks nothing like a
       missing role. Task 2 §3.
-- [ ] **CORS on the storage account — applied 2026-09-16.** The
-      seven-header rule (not the four-header rule it replaced) must be
-      live. This is invisible from the server side — it surfaces only in
+- [x] **CORS on the storage account — eight-header rule applied
+      2026-10-13.** The rule must include `content-md5` (the per-block
+      integrity hash), or every upload fails its preflight. Azure matches
+      rules by origin and method and does not fall through, so a stale
+      older rule with the same origin shadows a newer one: always
+      `az storage cors clear` before `cors add`. This is invisible from the server side — it surfaces only in
       the browser as an opaque network error — and is **the single most
       likely cause of a deployment that installs cleanly and does not
       work**. `preflight.sh` re-checks it with the credential-free

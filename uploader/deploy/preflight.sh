@@ -123,10 +123,10 @@ if command -v curl >/dev/null 2>&1; then
         "https://${STORAGE_ACCOUNT}.blob.core.windows.net/${STORAGE_CONTAINER}/preflight-probe.txt" \
         -H "Origin: ${ORIGIN}" \
         -H "Access-Control-Request-Method: PUT" \
-        -H "Access-Control-Request-Headers: x-ms-blob-type,x-ms-blob-content-type,content-type,content-length,x-ms-version,x-ms-client-request-id,x-ms-useragent" \
+        -H "Access-Control-Request-Headers: x-ms-blob-type,x-ms-blob-content-type,content-type,content-length,x-ms-version,x-ms-client-request-id,x-ms-useragent,content-md5" \
         2>/dev/null)
     if echo "$cors_headers" | grep -qi '^access-control-allow-origin:'; then
-        ok "CORS preflight succeeded — the seven-header rule is applied"
+        ok "CORS preflight succeeded — the eight-header rule is applied"
     else
         bad "CORS preflight did not return access-control-allow-origin —" \
             "the rule may have been cleared, edited or never applied" \
