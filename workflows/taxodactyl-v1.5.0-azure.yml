@@ -1,0 +1,78 @@
+# Could possible store API keys in a local file and index them by user email
+
+id: taxodactyl_150_azure
+name: Taxodactyl (Azure 1.5.0)
+description: Per-sample taxonomic classification from assembled DNA barcodes
+version: 1.5.0_azure
+website: https://github.com/qcif/taxodactyl
+author: Magdalena Antczak, Cameron Hyde, Daisy Li and Claire Herne
+logo: https://github.com/qcif/taxodactyl/blob/main/docs/images/taxodactyl_logo.png?raw=true
+
+workflow:
+  steps:
+    - name: Run taxonomic classification
+      params:
+        db_type: blast_core_nt
+        blastdb: /mnt/nvme/refdata/core_nt/core_nt
+        taxdb: /mnt/nvme/refdata/taxdump/taxdump
+        ncbi_user_email: ${CLOUDGENE_USER_EMAIL}
+        analyst_name: ${CLOUDGENE_USER_FULL_NAME}
+        trace_file: ${CLOUDGENE_WORKSPACE_HOME}/${CLOUDGENE_JOB_ID}/logs/step1-trace.csv
+        temp_root_dir: ./tmp
+      stdout: true
+      stderr: true
+
+    - name: Show retrieved secrets
+      type: command
+      cmd: >
+        /usr/bin/grep 'Azure Key Vault:'
+        $outdir/run.log
+        | /usr/bin/sed 's/^.* - DEBUG - //'
+        | /usr/bin/sort -u
+      bash: true
+      stdout: true
+      stderr: true
+
+    - name: Check for errors
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/collect_errors.sh --dir $outdir
+      stdout: true
+      stderr: true
+
+    - name: Zip workflow reports
+      type: command
+      stdout: true
+      stderr: true
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/bin/zip_reports.sh --dir $outdir
+
+  inputs:
+    - id: metadata
+      description: Input metadata CSV
+      type: file
+      accept: .csv
+      details: |
+        Click on '?' for an example file. Right click and 'Save Link As...' to download. 
+      help: https://raw.githubusercontent.com/qcif/taxodactyl/refs/heads/main/test/metadata_example.csv
+    - id: sequences
+      description: Sample DNA sequences in FASTA format
+      type: file
+      accept: .fasta, .fa, .fna, .fsa, .fas
+      help: https://raw.githubusercontent.com/qcif/taxodactyl/refs/heads/main/test/sequences_example.fasta
+      details: |
+        Only required if you do not include a "sequence" column in the metadata CSV. Click on '?' for an example file. Right click and 'Save Link As...' to download. Ensure sample IDs match those in the metadata file.
+      required: false
+    - id: ncbi_api_key
+      type: string
+      required: false
+      description: Your NCBI API key
+      details: Not required, but will make your run go faster and may reduce API errors. You only need to enter it the first time you run the workflow (it will be saved in a vault and recovered from it next time you run it).
+    - id: facility_name
+      description: Your facility/site name
+      type: string
+      required: false
+      details: Included in the workflow report. You only need to enter it the first time you run the workflow (it will be saved in a vault and recovered from it next time you run it).
+
+  outputs:
+    - id: outdir
+      description: Outputs
+      type: folder
