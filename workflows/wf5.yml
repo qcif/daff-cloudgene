@@ -1,0 +1,72 @@
+id: wf5_azure
+name: WF5
+description: Assemble mito or plastid genomes from long-read data
+version: 0.1
+website: https://github.com/qcif/daff-mito-assembly
+author: Cameron Hyde
+logo: https://github.com/qcif/taxodactyl/raw/refs/heads/main/docs/images/qcif.svg
+
+# Runs on Azure Batch. In Admin/Applications, set the profile to `azure`
+# and supply the Nextflow config that deploy/azure/run-wf5-azure.sh
+# would otherwise provide:
+#   - plugins: nf-schema@2.4.0, nf-azure@1.16.0, nf-cloudcache@0.4.3
+#   - env: AZURE_BATCH_ACCOUNT_NAME, AZURE_BATCH_ACCESS_KEY,
+#     STORAGE_ACCOUNT_STD, AZURE_STORAGE_ACCOUNT_KEY, WF5_AZURE_POOL,
+#     WF5_AZURE_WORKDIR, WF5_AZURE_CACHE (main.nf fails fast if unset)
+
+workflow:
+  steps:
+    - name: Assemble organelle genomes
+      params:
+        organelle_refs: az://refdata-wf5/v2026.09_1/recruit
+        protein_panel: az://refdata-wf5/v2026.09_1/proteins
+        blast_db: az://refdata-wf5/v2026.09_1/validate
+        annotate_refs: az://refdata-wf5/v2026.09_1/annotate
+        refs_manifest: az://refdata-wf5/v2026.09_1/manifest.json
+        analyst_name: ${CLOUDGENE_USER_FULL_NAME}
+      stdout: true
+      stderr: true
+
+    - name: Check for errors
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/deploy/cloudgene/collect_errors.sh --dir $outdir
+      stdout: true
+      stderr: true
+
+    - name: Zip workflow reports
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/deploy/cloudgene/zip_reports.sh --dir $outdir
+      stdout: true
+      stderr: true
+
+  inputs:
+    - id: samplesheet
+      description: Sample sheet
+      type: file
+      accept: .csv
+      details: |
+        One row per sample and organelle, with columns sample_id,
+        assembly_target (animal_mt, plant_pt or plant_mt) and reads (az://
+        paths to FASTQ files uploaded to https://cloudgene.qcif.edu.au/uploads/,
+        separated by '|' for multiple files). Optional columns: sample_info,
+        sample_type, sample_receipt_date, storage_location.
+        Click on '?' for an example file. Right click and 'Save Link As...' to download.
+      help: https://raw.githubusercontent.com/qcif/daff-mito-assembly/refs/heads/main/tests/integration/samples.csv
+    - id: facility
+      description: Your facility/site name
+      type: string
+      required: false
+      details: Included in the workflow report.
+    - id: polish
+      description: Extra polish
+      type: checkbox
+      value: false
+      values:
+        true: true
+        false: false
+      details: Run an extra polishing pass on each assembly. Off by default; does not usually yield significant gains.
+
+  outputs:
+    - id: outdir
+      description: Outputs
+      type: folder
