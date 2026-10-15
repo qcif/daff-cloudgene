@@ -1,5 +1,5 @@
 id: wf5_azure
-name: WF5
+name: WF5 (prototype)
 description: Assemble mito or plastid genomes from long-read data
 version: 0.1
 website: https://github.com/qcif/daff-mito-assembly
