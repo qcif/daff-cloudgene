@@ -1,0 +1,73 @@
+id: wf4
+name: VIEW
+description: Assemble viral genomes from short-read data
+version: 0.1
+website: https://github.com/qcif/daff-viral-assembly
+author: Marie-Emilie Gauthier Ellemor and Cameron Hyde
+logo: https://github.com/qcif/taxodactyl/raw/refs/heads/main/docs/images/qcif.svg
+
+# Runs on Azure Batch (pool `view`). In Admin/Applications, set the profile
+# to `azure` and supply the Nextflow config that deploy/azure/run-wf4.sh
+# would otherwise provide:
+#   - plugins: nf-validation@1.1.4, nf-azure
+#   - env: AZURE_BATCH_ACCESS_KEY, AZURE_STORAGE_ACCOUNT_KEY
+# The `azure` profile sets database_mode=mounted and blast_analysis_mode=single.
+# Reference DBs below are pre-staged to NVMe on the Batch nodes
+# (see params/azure_params.yml).
+
+workflow:
+  steps:
+    - name: Assemble viral genomes
+      params:
+        blastn_db: /mnt/nvme/refdata/core_nt/core_nt
+        taxdump: /mnt/nvme/refdata/taxdump/taxdump
+        genomad_db: /mnt/nvme/refdata/genomad_db
+        hmmer_db: /mnt/nvme/refdata/pfam/Pfam-A.hmm
+        kraken2_db: /mnt/nvme/refdata/kraken2_db
+        kaiju_db: /mnt/nvme/refdata/kaiju_db/kaiju_db.fmi
+        rrna_ref: /mnt/nvme/refdata/rrna_ref
+        prot_db: /mnt/nvme/refdata/diamond/viral.dmnd
+        rvdb_taxonomy: /mnt/nvme/refdata/rvdb_taxonomy
+        qfiltered_reads_threshold: 8000000
+        clean_reads_threshold: 2500000
+        subsample_size: 40000000
+        analyst_name: ${CLOUDGENE_USER_FULL_NAME}
+      stdout: true
+      stderr: true
+
+    # Zip before checking for errors: a failed check stops later steps,
+    # and the reports that did finish should still be downloadable.
+    - name: Zip workflow reports
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/deploy/cloudgene/zip_reports.sh --dir $outdir
+      stdout: true
+      stderr: true
+
+    - name: Check for errors
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/deploy/cloudgene/collect_errors.sh --dir $outdir --samplesheet $input
+      stdout: true
+      stderr: true
+
+  inputs:
+    - id: input
+      description: Sample sheet
+      type: file
+      accept: .csv
+      details: |
+        One row per read pair, with columns sample, fastq_1 and fastq_2 (az://
+        paths to FASTQ files uploaded to https://cloudgene.qcif.edu.au/uploads/).
+        Rows sharing a sample name are merged. Optional columns:
+        sample_information, sample_type, sample_receipt_date, storage_location.
+        Click on '?' for an example file. Right click and 'Save Link As...' to download.
+      help: https://raw.githubusercontent.com/qcif/daff-viral-assembly/refs/heads/main/index_example_blob.csv
+    - id: facility
+      description: Your facility/site name
+      type: string
+      required: false
+      details: Included in the workflow report.
+
+  outputs:
+    - id: outdir
+      description: Outputs
+      type: folder
