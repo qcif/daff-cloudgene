@@ -25,7 +25,7 @@
 </div>
 
 {{#is(loggedIn, true)}}
-<div class="jumbotron mb-5 py-5 bg-secondary bg-gradient">
+<div class="jumbotron mb-5 py-5 bg-secondary bg-gradient" style="margin-top: -2rem;">
   <div class="container">
     <div class="row align-items-center">
       <div class="col">
