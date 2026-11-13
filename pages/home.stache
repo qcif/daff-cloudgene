@@ -25,6 +25,23 @@
 </div>
 
 {{#is(loggedIn, true)}}
+<div class="jumbotron mb-5 py-5 bg-secondary bg-gradient">
+  <div class="container">
+    <div class="row align-items-center">
+      <div class="col">
+        <h1>Struggling with Taxodactyl input data validation?</h1>
+      </div>
+
+      <div class="col">
+        <p class="lead text-light">
+          Don't wait 10 minutes to get an error - fix your metadata.csv in real-time
+        </p>
+        <a class="btn btn-primary" href="/validation/">Interactive validation tool</a>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="container bd-content" style="margin-bottom: 0px;">
   <h1>Available workflows</h1>
 
@@ -39,40 +56,6 @@
       </tr>
     </thead>
     <tbody>
-      <!-- <tr>
-        <td>
-          <a href="/#!pages/nanopore_assembly">
-            #1 Barcode assembly
-          </a>
-        </td>
-        <td>
-          Assembly of barcode consensus sequence from Nanopore sequencing reads (one sample per run).
-        </td>
-        <td>
-          <ul>
-            <li>
-              <code>FASTQ</code> file(s) containing consensus DNA sequences
-            </li>
-            <li>
-              <code>CSV</code> file with sample metadata
-            </li>
-          </ul>
-        </td>
-        <td>
-          <ul>
-            <li>
-              <code>HTML</code> web-based workflow report
-            </li>
-            <li>
-              <code>FASTA</code> file of consensus sequences
-            </li>
-          </ul>
-        </td>
-        <td>
-          <a class="btn btn-primary btn-sm" href="/#!run/ont_amplicon_assembly">Run</a>
-        </td>
-      </tr> -->
-
       <tr>
         <td>
           <a href="/#!pages/taxodactyl">
@@ -127,12 +110,6 @@
         </tr>
       </thead>
       <tbody>
-        <!-- <tr>
-          <td>#1 Barcode assembly</td>
-          <td>
-            <a href="https://github.com/qcif/daff-ont-amplicon/issues" target="_blank">https://github.com/qcif/daff-ont-amplicon/issues</a>
-          </td>
-        </tr> -->
         <tr>
           <td>#2 Taxodactyl</td>
           <td>
