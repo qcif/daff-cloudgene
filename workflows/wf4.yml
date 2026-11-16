@@ -49,6 +49,12 @@ workflow:
       stdout: true
       stderr: true
 
+    - name: Link reports
+      type: command
+      cmd: /usr/bin/bash ${CLOUDGENE_APP_LOCATION}/deploy/cloudgene/link_reports.sh --dir $outdir
+      stdout: true
+      stderr: true
+
   inputs:
     - id: input
       description: Sample sheet
