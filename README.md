@@ -11,6 +11,14 @@ These files get linked to the appropriate locations to make the web server funct
 ```
 cloudgene.service -> /etc/systemd/system/cloudgene.service
 nginx-vhost.conf -> /etc/nginx/sites-available/cloudgene.qcif.edu.au.conf
+fail2ban/jail.local -> /etc/fail2ban/jail.local
+```
+
+After changing `fail2ban/jail.local`, validate and reload on the server:
+
+```
+sudo fail2ban-client -t
+sudo systemctl restart fail2ban
 ```
 
 `footer.html` - this just gets copy/pasted into the Cloudgene web admin, where you can set a custom footer.

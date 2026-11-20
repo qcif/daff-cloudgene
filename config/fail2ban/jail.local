@@ -1,0 +1,35 @@
+# fail2ban jail config for cloudgene.qcif.edu.au
+# Symlinked to /etc/fail2ban/jail.local (see README.md)
+
+[DEFAULT]
+# Drop banned IPs at the firewall. The previous hostsdeny action still let
+# banned hosts open TCP connections to sshd, so they kept hammering it.
+banaction = nftables-multiport
+banaction_allports = nftables-allports
+
+findtime = 10m
+maxretry = 5
+
+# Escalating bans for repeat offenders: 1h, 2h, 4h ... capped at 1 week
+bantime = 1h
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 1w
+
+[sshd]
+enabled = true
+# Password auth is disabled, so most attacks show up as pubkey failures and
+# preauth disconnects, which only the aggressive mode matches.
+mode = aggressive
+port = ssh
+logpath = /var/log/auth.log
+backend = auto
+
+# Hosts banned 3 times within a day are blocked on all ports for 1 week
+[recidive]
+enabled = true
+logpath = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+findtime = 1d
+maxretry = 3
+bantime = 1w
