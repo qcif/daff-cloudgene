@@ -21,6 +21,11 @@ sudo fail2ban-client -t
 sudo systemctl restart fail2ban
 ```
 
+`needrestart/cloudgene.conf -> /etc/needrestart/conf.d/cloudgene.conf` stops
+unattended-upgrades from restarting Cloudgene, which kills running jobs. After
+library upgrades, `needrestart` will list cloudgene as needing a restart; do it
+manually (`sudo systemctl restart cloudgene`) when no jobs are running.
+
 `footer.html` - this just gets copy/pasted into the Cloudgene web admin, where you can set a custom footer.
 
 ## `./pages/` - Cloudgene webpage templates
